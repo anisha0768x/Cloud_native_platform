@@ -1,5 +1,7 @@
 # Helio Operations v3 — verification record
 
+This is the earlier release record. See [CURRENT_AUDIT.md](CURRENT_AUDIT.md) for the latest local audit and fixes.
+
 This record describes the distributed release, not the earlier single-process prototype. Checks were executed locally on Windows with Docker Desktop's Linux engine, Python 3.13 and Microsoft Edge through Playwright. The real-stack integration report is dated **30 September 2026**. Final browser and source-package checks passed on **1 October 2026** and are recorded below.
 
 ## Executed checks
@@ -73,4 +75,4 @@ From the project root, create the source release with:
 python distributed/scripts/package_release.py
 ```
 
-The output is `output/Source/Helio_Cloud_Operations_Final.zip`, with a separate `.zip.sha256` checksum. `SOURCE_MANIFEST.json` records the SHA-256 of every included source/document file. The packager checks each archived hash, ZIP integrity and generated-secret exclusion. It excludes earlier prototypes, operational data, `.env` files, keys, dependencies and test screenshots.
+The output is `output/Source/Helio_Cloud_Operations_Audited.zip`, with a separate `.zip.sha256` checksum. `SOURCE_MANIFEST.json` records the SHA-256 of every included source/document file. The packager checks each archived hash, ZIP integrity and generated-secret exclusion. It excludes earlier prototypes, operational data, `.env` files, keys, dependencies and test screenshots.

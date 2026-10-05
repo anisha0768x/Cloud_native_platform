@@ -2,7 +2,7 @@ import re
 import time
 from fastapi import Request, Query
 from helio.common import actor, rpc, service_app, stamp, uid
-from helio.contracts import LogInput
+from helio.contracts import LogAnalysisRequest, LogInput
 
 
 def redact(value):
@@ -69,17 +69,17 @@ def install(app):
         return {"id": row["id"]}
 
     @app.post("/api/logs/analyze")
-    def analyze(payload: dict, request: Request):
+    def analyze(payload: LogAnalysisRequest, request: Request):
         who = actor(request, "operate")
-        service = payload.get("service_id", "svc-worker")
+        service = payload.service_id
         rpc("catalog", "/internal/services/" + service)
         rows = db().rows("logs", 100, {"service_id": service}, time.time() - 900)
         selected = [
             r
             for r in rows
             if r["level"] in {"WARN", "ERROR"}
-            or payload.get("query")
-            and payload["query"].lower() in r["message"].lower()
+            or payload.query
+            and payload.query.lower() in r["message"].lower()
         ][:12]
         metrics = rpc("metrics", "/internal/summary/" + service)["latest"]
         points = list(metrics.values())[:10]

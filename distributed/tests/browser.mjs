@@ -19,6 +19,15 @@ try {
   page.on('pageerror',error=>report.errors.push(error.message));
   page.on('response',response=>{if(response.url().startsWith(base)&&response.status()>=500)report.errors.push(response.status()+' '+response.url());});
   await page.goto(base);
+  if ((await (await fetch(base+'/api/auth/setup-status')).json()).required) {
+    await page.locator('#setup-form').waitFor({state:'visible'});
+    await page.locator('#setup-form [name=name]').fill('Verification Administrator');
+    await page.locator('#setup-form [name=email]').fill('verify@example.test');
+    await page.locator('#setup-form [name=password]').fill('Verification-only-'+env.SETUP_TOKEN.slice(0,18));
+    await page.locator('#setup-form [name=setup_token]').fill(env.SETUP_TOKEN);
+    await page.locator('#setup-form button[type=submit]').click();
+    report.checks.push('First-run administrator setup through the browser');
+  }
   await page.locator('#login-form').waitFor({state:'visible'});
   await page.screenshot({path:path.join(output,'sign-in.png'),fullPage:true});
   await page.locator('#login-form [name=email]').fill('verify@example.test');

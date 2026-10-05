@@ -6,7 +6,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUT = ROOT / "output" / "Source" / "Helio_Cloud_Operations_Verified_2026-10-01.zip"
+OUTPUT = ROOT / "output" / "Source" / "Helio_Cloud_Operations_Audited.zip"
 PREFIX = "Helio_Cloud_Operations/"
 ROOT_FILES = [
     "README.md",
@@ -27,7 +27,13 @@ ROOT_FILES = [
     "Dockerfile",
     "docker-compose.yml",
 ]
-DOCS = ["ARCHITECTURE_V3.md", "CLOUD_STATUS.md", "KUBERNETES_ADAPTER.md", "VERIFICATION.md"]
+DOCS = [
+    "ARCHITECTURE_V3.md",
+    "CLOUD_STATUS.md",
+    "CURRENT_AUDIT.md",
+    "KUBERNETES_ADAPTER.md",
+    "VERIFICATION.md",
+]
 
 
 def allowed(path):
@@ -74,9 +80,10 @@ def main():
             )
         entries[file.relative_to(ROOT).as_posix()] = data
     manifest = {name: hashlib.sha256(data).hexdigest() for name, data in entries.items()}
-    entries["SOURCE_MANIFEST.json"] = (
+    manifest_bytes = (
         json.dumps({"version": "3.0.0", "algorithm": "SHA-256", "files": manifest}, indent=2) + "\n"
     ).encode()
+    entries["SOURCE_MANIFEST.json"] = manifest_bytes
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(OUTPUT, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, data in entries.items():
@@ -85,6 +92,7 @@ def main():
         assert archive.testzip() is None
         for name, digest in manifest.items():
             assert hashlib.sha256(archive.read(PREFIX + name)).hexdigest() == digest
+    (ROOT / "SOURCE_MANIFEST.json").write_bytes(manifest_bytes)
     checksum = hashlib.sha256(OUTPUT.read_bytes()).hexdigest()
     OUTPUT.with_suffix(".zip.sha256").write_text(
         checksum + "  " + OUTPUT.name + "\n", encoding="utf-8"

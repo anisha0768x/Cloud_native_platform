@@ -129,6 +129,17 @@ class StartupTests(unittest.TestCase):
         self.assertIn("--repair-database", message)
         self.assertNotIn("secret-sensitive", message)
 
+    def test_first_run_waits_for_database_roles(self):
+        missing = subprocess.CompletedProcess([], 1, b"auth\n", b"")
+        ready = subprocess.CompletedProcess([], 0, b"", b"")
+        with (
+            patch.object(db.subprocess, "run", side_effect=[missing, ready]) as run,
+            patch.object(db.time, "sleep") as sleep,
+        ):
+            db.check_database(["docker", "compose"], {}, attempts=3)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def test_failed_backup_prevents_password_changes(self):
         self.run_recovery(fail_dump=True)
 

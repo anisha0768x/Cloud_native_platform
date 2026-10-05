@@ -7,11 +7,12 @@ import json
 import secrets
 import time
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 import pytest
 import pyotp
 from fastapi.testclient import TestClient
 
-from helio.services import auth, capacity
+from helio.services import auth, capacity, catalog, forecast
 from helio.services.forecast import predict
 from helio.runtime import DockerRuntime, KubernetesRuntime
 from helio.contracts import Autoscale
@@ -48,6 +49,44 @@ class MemoryDB:
 
     def audit(self, *args):
         self.events.append(("audit", args))
+
+
+def test_breaches_require_distinct_recent_observations():
+    first = {"id": "metric-1", "occurred": 100.0}
+    second = {"id": "metric-2", "occurred": 105.0}
+    late = {"id": "metric-3", "occurred": 200.0}
+    state = catalog.breach_state({}, first, True, 30)
+    assert state["count"] == 1
+    assert catalog.breach_state(state, first, True, 30)["count"] == 1
+    state = catalog.breach_state(state, second, True, 30)
+    assert state["count"] == 2
+    assert catalog.breach_state(state, late, True, 30)["count"] == 1
+    assert catalog.breach_state(state, late, False, 30)["count"] == 0
+
+
+def test_forecast_preserves_service_id_as_one_query_value(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SECRET", "isolated-service-test-secret")
+    forecast.app.state.ctx = SimpleNamespace(paused_until=0)
+    requested = []
+
+    def history(service, path):
+        requested.append(path)
+        return {"points": []}
+
+    monkeypatch.setattr(forecast, "rpc", history)
+    headers = {
+        "X-Helio-Internal": "isolated-service-test-secret",
+        "X-Helio-Actor": base64.urlsafe_b64encode(json.dumps({"role": "viewer"}).encode()).decode(),
+    }
+    service_id = "svc-worker&metric_name=error_percent"
+    client = TestClient(forecast.app)
+    response = client.get("/api/predictions", params={"service_id": service_id}, headers=headers)
+    client.close()
+    assert response.status_code == 200
+    assert parse_qs(urlsplit(requested[0]).query) == {
+        "service_id": [service_id],
+        "metric_name": ["request_rate"],
+    }
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from fastapi import Request, Response
 import pyotp
 
 from helio.common import PERMISSIONS, actor, fail, service_app, stamp, uid
-from helio.contracts import Credentials, NewUser, UserUpdate
+from helio.contracts import Credentials, NewUser, PasswordChange, UserUpdate
 
 
 def password_hash(password):
@@ -260,14 +260,12 @@ def install(app):
         return {"ok": True}
 
     @app.post("/api/auth/password")
-    def change_password(request: Request, payload: dict):
+    def change_password(request: Request, payload: PasswordChange):
         user, principal = own(request)
-        if not password_ok(payload.get("current_password", ""), user["password_hash"]):
+        if not password_ok(payload.current_password, user["password_hash"]):
             fail(403, "Current password is incorrect.")
-        if not 12 <= len(payload.get("new_password", "")) <= 256:
-            fail(422, "Use a password of 12–256 characters.")
         with db().tx():
-            user["password_hash"] = password_hash(payload["new_password"])
+            user["password_hash"] = password_hash(payload.new_password)
             db().put("users", user["id"], user)
             revoke(user["id"])
             db().audit(user["email"], "password.changed", user["id"])

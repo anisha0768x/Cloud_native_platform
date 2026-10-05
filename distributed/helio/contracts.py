@@ -48,6 +48,27 @@ class NewUser(Credentials):
         return value
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+class NotificationRequest(BaseModel):
+    incident_id: str = Field(min_length=1, max_length=128)
+    channel: Literal["inbox", "email", "slack", "webhook"] = "inbox"
+
+
+class LogAnalysisRequest(BaseModel):
+    service_id: str = Field(default="svc-worker", min_length=1, max_length=128)
+    query: str = Field(default="", max_length=200)
+
+
+class MaintenanceOutcome(BaseModel):
+    observation_id: str = Field(min_length=1, max_length=128)
+    failed: bool = Field(strict=True)
+    evidence: str = Field(min_length=10, max_length=2000)
+
+
 class UserUpdate(BaseModel):
     role: Literal["viewer", "operator", "admin"]
     active: bool = True

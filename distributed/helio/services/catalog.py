@@ -14,20 +14,35 @@ def consume(ctx, topic, event):
         ctx.db.put("latest", key, point)
 
 
+def breach_state(prior, point, active, window):
+    if not active:
+        count = 0
+    elif point["id"] == prior.get("last_id"):
+        count = prior.get("count", 0)
+    elif 0 < point["occurred"] - prior.get("last_occurred", 0) <= window:
+        count = prior.get("count", 0) + 1
+    else:
+        count = 1
+    return {"count": count, "last_id": point["id"], "last_occurred": point["occurred"]}
+
+
 def tick(ctx):
     db = ctx.db
     thresholds = rpc("configuration", "/internal/settings")["thresholds"]
     for point in db.rows("latest", 1000):
-        if time.time() - point["occurred"] > 30:
-            continue
         if point["name"] not in {"latency_p95_ms", "error_percent"}:
             continue
         limit = thresholds["latency_ms" if point["name"] == "latency_p95_ms" else "error_percent"]
         key = point["service_id"] + ":" + point["name"]
+        if time.time() - point["occurred"] > 30:
+            prior = db.get("breaches", key, {"count": 0})
+            if prior.get("count"):
+                db.put("breaches", key, {"count": 0})
+            continue
         active = point["value"] > limit
         with db.tx():
             counter = db.get("breaches", key, {"count": 0})
-            counter["count"] = counter["count"] + 1 if active else 0
+            counter = breach_state(counter, point, active, thresholds["window_seconds"])
             db.put("breaches", key, counter)
             existing = next(
                 (

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Request
 from helio.common import actor, fail, rpc, service_app, stamp, uid
+from helio.contracts import NotificationRequest
 
 
 def channels():
@@ -125,17 +126,17 @@ def install(app):
         return {"notifications": db().rows("notices", 100), "channels": channels()}
 
     @app.post("/api/v1/notifications/send")
-    def send(payload: dict, request: Request):
+    def send(payload: NotificationRequest, request: Request):
         who = actor(request, "operate")
-        incident = rpc("catalog", "/internal/incidents/" + payload.get("incident_id", ""))
+        incident = rpc("catalog", "/internal/incidents/" + payload.incident_id)
         with db().tx():
-            row = enqueue(db(), incident, payload.get("channel", "inbox"))
+            row = enqueue(db(), incident, payload.channel)
             db().audit(who["email"], "notification.requested", row["id"])
         return row
 
     @app.post("/api/notifications/{notice_id}/read")
     def read(notice_id: str, request: Request):
-        actor(request)
+        actor(request, "operate")
         row = db().get("notices", notice_id)
         if not row:
             fail(404, "Notification not found")

@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import shutil
 import subprocess
+import time
 
 SERVICES = (
     "gateway",
@@ -48,16 +49,21 @@ exit "$failed"
 """ % " ".join(SERVICES)
 
 
-def check_database(compose, child_env):
-    result = subprocess.run(
-        compose + ["exec", "-T", "postgres", "sh", "-s"],
-        # Send LF bytes: Windows text-mode stdin otherwise converts this to CRLF,
-        # which Linux /bin/sh rejects (including `set -eu\r`).
-        input=login_check_script().encode("utf-8"),
-        capture_output=True,
-        env=child_env,
-        timeout=90,
-    )
+def check_database(compose, child_env, attempts=1):
+    for attempt in range(attempts):
+        result = subprocess.run(
+            compose + ["exec", "-T", "postgres", "sh", "-s"],
+            # Send LF bytes: Windows text-mode stdin otherwise converts this to CRLF,
+            # which Linux /bin/sh rejects (including `set -eu\r`).
+            input=login_check_script().encode("utf-8"),
+            capture_output=True,
+            env=child_env,
+            timeout=90,
+        )
+        if result.returncode == 0:
+            return
+        if attempt + 1 < attempts:
+            time.sleep(2)
     if result.returncode:
         names = [
             s

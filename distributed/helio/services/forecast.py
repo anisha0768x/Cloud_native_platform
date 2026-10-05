@@ -1,5 +1,6 @@
 import statistics
 import time
+from urllib.parse import urlencode
 from fastapi import Request, Query
 from helio.common import actor, rpc, service_app, stamp, uid
 
@@ -101,7 +102,9 @@ def install(app):
     ):
         actor(request)
         points = rpc(
-            "metrics", "/internal/history?service_id=" + service_id + "&metric_name=request_rate"
+            "metrics",
+            "/internal/history?"
+            + urlencode({"service_id": service_id, "metric_name": "request_rate"}),
         )["points"][-180:]
         result = predict(points, horizon_seconds)
         if result["status"] == "ready":

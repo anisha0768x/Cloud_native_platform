@@ -196,7 +196,8 @@ def main(argv=None):
         values = repair_database(compose, values, env_file, ROOT, args.rotate_access_secrets)
         child_env = dict(os.environ, **values)
     run(compose + ["up", "-d", "--no-build", "--wait", "--wait-timeout", "120", "postgres"])
-    check_database(compose, child_env)
+    # pg_isready can turn healthy before first-run init scripts finish creating roles.
+    check_database(compose, child_env, attempts=15)
     run(compose + ["up", "-d", "--no-build", "--wait", "--wait-timeout", "240"])
     with urlopen(url + "/api/auth/setup-status", timeout=10) as response:
         first_run = json.load(response)["required"]

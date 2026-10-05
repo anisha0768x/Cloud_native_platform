@@ -63,8 +63,6 @@ def permission(path, method):
         return "storage"
     if path in {"/api/v1/metrics/ingest", "/api/logs/ingest"}:
         return "ingest"
-    if path.endswith("/read"):
-        return "read"
     return "operate"
 
 

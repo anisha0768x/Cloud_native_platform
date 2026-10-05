@@ -2,7 +2,7 @@
 
 A cloud-native operations platform built from **twelve independent FastAPI microservices**. It lets teams monitor services, manage incidents, scale workloads, store files securely, send notifications and back up or restore the whole system, all from one web dashboard that runs locally with Docker.
 
-> **Status:** Verified local release (tested 30 Sep – 1 Oct 2026). It is a single-host demonstration deployment, not a production-certified system. See [`docs/CLOUD_STATUS.md`](docs/CLOUD_STATUS.md) for limitations.
+> **Status:** Verified local release. It is a single-host demonstration deployment, not a production-certified system. See the [current audit](docs/CURRENT_AUDIT.md) and [`docs/CLOUD_STATUS.md`](docs/CLOUD_STATUS.md) for checks and limitations.
 
 ---
 
@@ -148,12 +148,12 @@ python distributed/scripts/setup.py --show-setup-token
 
 | Test suite | Result |
 |---|---|
-| Focused regression checks | 13 passed |
-| Real-stack integration and fault checks | 18 passed |
-| Browser workflow checks | 21 passed |
+| Focused regression checks | 38 passed |
+| Real-stack integration and fault checks | 20 passed |
+| Browser workflow checks | 22 passed |
 | Clean-source archive/startup checks | 8 passed |
 
-These results cover the tested workflows only and are **not** a production certification. Details: [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+These results cover the tested workflows only and are **not** a production certification. Current details: [`docs/CURRENT_AUDIT.md`](docs/CURRENT_AUDIT.md). Earlier release evidence: [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
 ---
 

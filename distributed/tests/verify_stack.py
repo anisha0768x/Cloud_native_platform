@@ -111,6 +111,26 @@ class Verification:
         )
         return json.loads(self.compose("exec", "-T", "gateway", "python", "-c", program))
 
+    def catalog_received(self, service_id, metric_name, observation_id):
+        program = (
+            "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL']); "
+            "print(bool(c.execute(\"SELECT 1 FROM documents WHERE collection='latest' "
+            "AND id=%s AND body->>'id'=%s\", "
+            + repr((service_id + ":" + metric_name, observation_id))
+            + ").fetchone())); c.close()"
+        )
+        return self.compose("exec", "-T", "catalog", "python", "-c", program).strip() == "True"
+
+    def catalog_breach_count(self, service_id, metric_name):
+        program = (
+            "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL']); "
+            "r=c.execute(\"SELECT body->>'count' FROM documents WHERE collection='breaches' "
+            'AND id=%s", '
+            + repr((service_id + ":" + metric_name,))
+            + ").fetchone(); print(int(r[0]) if r else 0); c.close()"
+        )
+        return int(self.compose("exec", "-T", "catalog", "python", "-c", program).strip())
+
     def api(self, method, path, status=200, **kwargs):
         response = self.client.request(method, path, **kwargs)
         assert (
@@ -159,6 +179,29 @@ class Verification:
         )
 
     def run(self):
+        with self.step("Published API routes enforce the authentication boundary"):
+            schema = self.client.get("/api/openapi.json").json()
+            assert len(schema["paths"]) >= 45
+            public = {"/api/auth/setup-status", "/api/auth/setup", "/api/auth/login"}
+            with httpx.Client(base_url=self.base, trust_env=False, timeout=30) as anonymous:
+                for route, operations in schema["paths"].items():
+                    if route in public:
+                        continue
+                    path = route.replace("{service_id}", "sample").replace(
+                        "{incident_id}", "sample"
+                    )
+                    path = path.replace("{object_id}", "sample").replace("{notice_id}", "sample")
+                    path = path.replace("{user_id}", "sample").replace("{event_id}", "sample")
+                    path = path.replace("{service}", "sample").replace("{key}", "sample")
+                    for method in operations:
+                        if method.lower() in {"get", "post", "put", "patch", "delete"}:
+                            response = anonymous.request(method.upper(), path)
+                            assert response.status_code == 401, (
+                                method,
+                                route,
+                                response.status_code,
+                            )
+
         with self.step("First-administrator setup and authenticated gateway"):
             status = eventually(
                 lambda: self.client.get("/api/auth/setup-status").json(),
@@ -178,6 +221,22 @@ class Verification:
                 in self.client.cookies.jar._cookies["127.0.0.1"]["/"]["helio_session"]._rest
             )
             self.api("GET", "/internal/snapshot", 403)
+
+        with self.step("Malformed API payloads return validation errors"):
+            self.api(
+                "POST",
+                "/api/auth/password",
+                422,
+                json={"current_password": 7, "new_password": "Valid-new-password-44"},
+            )
+            self.api("POST", "/api/logs/analyze", 422, json={"query": 7})
+            self.api("POST", "/api/v1/notifications/send", 422, json={"incident_id": 7})
+            self.api(
+                "POST",
+                "/api/maintenance/outcomes",
+                422,
+                json={"observation_id": "sample", "failed": "false", "evidence": "Evidence note"},
+            )
 
         with self.step("Twelve real services and private PostgreSQL ownership"):
             data = eventually(
@@ -300,6 +359,28 @@ class Verification:
             svc = self.api("POST", "/api/services", 201, json={"name": "probe-" + self.unique})
             self.service_id = svc["id"]
             assert svc["status"] == "unknown"
+            first = self.api(
+                "POST",
+                "/api/v1/metrics/ingest",
+                201,
+                json={
+                    "service_id": self.service_id,
+                    "metric_name": "latency_p95_ms",
+                    "value": 2000,
+                },
+            )
+            eventually(
+                lambda: self.catalog_received(self.service_id, "latency_p95_ms", first["id"]),
+                description="first distinct breach delivered to catalog",
+            )
+            eventually(
+                lambda: self.catalog_breach_count(self.service_id, "latency_p95_ms") == 1,
+                description="first distinct breach counted once",
+            )
+            assert not any(
+                a["service_id"] == self.service_id
+                for a in self.api("GET", "/api/alerts?status=all")["alerts"]
+            )
             self.api(
                 "POST",
                 "/api/v1/metrics/ingest",
@@ -373,13 +454,33 @@ class Verification:
 
         with self.step("Asynchronous local SMTP delivery and duplicate suppression"):
             key = self.incident["id"]
-            eventually(
-                lambda: any(
-                    n["incident_id"] == key and n["channel"] == "inbox"
-                    for n in self.api("GET", "/api/v1/notifications")["notifications"]
+            notice = eventually(
+                lambda: next(
+                    (
+                        n
+                        for n in self.api("GET", "/api/v1/notifications")["notifications"]
+                        if n["incident_id"] == key and n["channel"] == "inbox"
+                    ),
+                    None,
                 ),
                 description="Kafka inbox notification",
             )
+            with httpx.Client(base_url=self.base, trust_env=False, timeout=30) as viewer:
+                login = viewer.post(
+                    "/api/auth/login",
+                    json={
+                        "email": self.unique + "@viewer.test",
+                        "password": "Viewer-test-password-42",
+                    },
+                ).json()
+                assert (
+                    viewer.post(
+                        "/api/notifications/" + notice["id"] + "/read",
+                        headers={"Authorization": "Bearer " + login["access_token"]},
+                    ).status_code
+                    == 403
+                )
+            self.api("POST", "/api/notifications/" + notice["id"] + "/read")
             sent = self.api(
                 "POST", "/api/v1/notifications/send", json={"incident_id": key, "channel": "email"}
             )
@@ -613,7 +714,7 @@ class Verification:
             self.compose("stop", "kafka")
             try:
                 svc = self.api("POST", "/api/services", 201, json={"name": "outage-" + self.unique})
-                self.api(
+                observation = self.api(
                     "POST",
                     "/api/v1/metrics/ingest",
                     201,
@@ -623,13 +724,43 @@ class Verification:
                 assert pending["body"]["outbox_pending"] >= 1
             finally:
                 self.compose("start", "kafka")
+
+            # A delayed observation can be stale by the time Kafka recovers.
+            # Verify delivery from the durable outbox independently of alert freshness.
+            eventually(
+                lambda: self.catalog_received(svc["id"], "error_percent", observation["id"]),
+                seconds=120,
+                description="outbox replay after Kafka recovery",
+            )
+            # Alerting deliberately requires fresh evidence, so submit a new
+            # observation after recovery rather than alerting on a stale event.
+            fresh = self.api(
+                "POST",
+                "/api/v1/metrics/ingest",
+                201,
+                json={"service_id": svc["id"], "metric_name": "error_percent", "value": 40},
+            )
+            eventually(
+                lambda: self.catalog_received(svc["id"], "error_percent", fresh["id"]),
+                description="fresh post-recovery observation",
+            )
+            eventually(
+                lambda: self.catalog_breach_count(svc["id"], "error_percent") >= 1,
+                description="fresh post-recovery breach evaluation",
+            )
+            self.api(
+                "POST",
+                "/api/v1/metrics/ingest",
+                201,
+                json={"service_id": svc["id"], "metric_name": "error_percent", "value": 40},
+            )
             eventually(
                 lambda: any(
                     a["service_id"] == svc["id"]
                     for a in self.api("GET", "/api/alerts?status=all")["alerts"]
                 ),
                 seconds=120,
-                description="outbox replay after Kafka recovery",
+                description="fresh incident evidence after Kafka recovery",
             )
             self.compose("restart", "catalog", "notifications")
             eventually(

@@ -3,6 +3,7 @@
 import time
 from fastapi import Request
 from helio.common import actor, fail, rpc, service_app, stamp, uid
+from helio.contracts import MaintenanceOutcome
 
 
 def tick(ctx):
@@ -50,18 +51,16 @@ def install(app):
         }
 
     @app.post("/api/maintenance/outcomes")
-    def label(payload: dict, request: Request):
+    def label(payload: MaintenanceOutcome, request: Request):
         who = actor(request, "operate")
-        row = db().get("observations", payload.get("observation_id", ""))
+        row = db().get("observations", payload.observation_id)
         if not row:
             fail(404, "Observation not found")
         if time.time() - row["occurred"] < 300:
             fail(409, "Wait until the full five-minute outcome window has elapsed.")
-        if not isinstance(payload.get("failed"), bool) or len(payload.get("evidence", "")) < 10:
-            fail(422, "Provide the observed outcome and a supporting evidence note.")
         row.update(
-            failed_within_five_minutes=payload["failed"],
-            label_evidence=payload["evidence"][:2000],
+            failed_within_five_minutes=payload.failed,
+            label_evidence=payload.evidence,
             label_actor=who["email"],
         )
         db().put("observations", row["id"], row)
