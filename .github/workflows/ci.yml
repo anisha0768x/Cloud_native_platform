@@ -1,0 +1,32 @@
+name: distributed-operations
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest distributed/tests -q --junitxml=test-results/unit.xml
+      - run: python -m black --check distributed/helio distributed/scripts distributed/tests services/workload/worker.py
+      - run: python distributed/scripts/setup.py --env-file distributed/.env.verify --project helio-verify-ci --port 18080 --mail-port 18025
+      - run: docker build -t helio-worker:v3 services/workload
+      - run: docker build -t helio-platform:v3 -f distributed/Dockerfile .
+      - run: docker compose --env-file distributed/.env.verify -f distributed/compose.yaml up -d --no-build --wait --wait-timeout 240
+      - run: python distributed/tests/verify_stack.py --env-file distributed/.env.verify --faults
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-evidence
+          path: test-results/
+      - run: docker compose --env-file distributed/.env.verify -f distributed/compose.yaml stop
+        if: always()

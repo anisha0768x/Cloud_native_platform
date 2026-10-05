@@ -1,0 +1,67 @@
+{
+  "time": "2026-10-05T16:13:01.962164+00:00",
+  "project": "helio-verify-startup-20261005",
+  "base_url": "http://127.0.0.1:8090",
+  "checks": [
+    {
+      "name": "First-administrator setup and authenticated gateway",
+      "status": "passed",
+      "seconds": 0.62
+    },
+    {
+      "name": "Twelve real services and private PostgreSQL ownership",
+      "status": "passed",
+      "seconds": 2.16
+    },
+    {
+      "name": "RBAC, CSRF and last-administrator protection",
+      "status": "passed",
+      "seconds": 2.12
+    },
+    {
+      "name": "Measured workload, actual container scaling and Kafka telemetry",
+      "status": "passed",
+      "seconds": 4.13
+    },
+    {
+      "name": "Service registration, fresh metric events and incident lifecycle",
+      "status": "passed",
+      "seconds": 6.05
+    },
+    {
+      "name": "Evidence-linked diagnostics and credential redaction",
+      "status": "passed",
+      "seconds": 0.34
+    },
+    {
+      "name": "Asynchronous local SMTP delivery and duplicate suppression",
+      "status": "passed",
+      "seconds": 2.03
+    },
+    {
+      "name": "Real S3 bytes, encryption, versions and retention",
+      "status": "passed",
+      "seconds": 4.22
+    },
+    {
+      "name": "Cost arithmetic and explicit forecast/maintenance limits",
+      "status": "passed",
+      "seconds": 0.37
+    },
+    {
+      "name": "Encrypted backup, PostgreSQL restore verification and real recovery",
+      "status": "passed",
+      "seconds": 7.08
+    },
+    {
+      "name": "MFA enrollment revokes old sessions and blocks unverified privilege",
+      "status": "passed",
+      "seconds": 3.26
+    },
+    {
+      "name": "Final service readiness, audit persistence and API specification",
+      "status": "passed",
+      "seconds": 1.14
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "checks": [
+    "Cookie sign-in and measured command center",
+    "Rendered overview",
+    "Rendered services",
+    "Rendered incidents",
+    "Rendered capacity",
+    "Rendered logs",
+    "Rendered predict",
+    "Rendered notifications",
+    "Rendered storage",
+    "Rendered costs",
+    "Rendered security",
+    "Rendered network",
+    "Rendered recovery",
+    "Rendered audit",
+    "Rendered settings",
+    "Service registration and persisted metric through browser forms",
+    "Browser scaling and real workload execution",
+    "Byte-exact S3 upload and download in browser",
+    "Browser backup and PostgreSQL restore validation",
+    "390-pixel mobile layout and navigation",
+    "No stale team branding, JavaScript errors or server failures"
+  ],
+  "errors": [],
+  "screenshots": [
+    "overview.png",
+    "capacity.png",
+    "predict.png",
+    "network.png"
+  ],
+  "base": "http://127.0.0.1:18081",
+  "status": "passed",
+  "recorded_at": "2026-10-01T11:36:22.255657+00:00"
+}

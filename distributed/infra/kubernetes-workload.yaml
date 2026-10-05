@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: helio-workload
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: helio-capacity
+  namespace: helio-workload
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: helio-capacity
+  namespace: helio-workload
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [checkout-api]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    resourceNames: [checkout-api]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: helio-capacity
+  namespace: helio-workload
+subjects:
+  - kind: ServiceAccount
+    name: helio-capacity
+    namespace: helio-workload
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: helio-capacity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: helio-workload
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: helio-checkout}
+  template:
+    metadata:
+      labels: {app: helio-checkout}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: helio-worker:v3
+          imagePullPolicy: IfNotPresent
+          args: [python, worker.py, --health-port, '9091']
+          ports:
+            - {name: work, containerPort: 9090}
+            - {name: health, containerPort: 9091}
+          resources:
+            requests: {cpu: 100m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            httpGet: {path: /health, port: health}
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: health}
+            periodSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-api
+  namespace: helio-workload
+spec:
+  type: NodePort
+  selector: {app: helio-checkout}
+  ports:
+    - {name: work, port: 9090, targetPort: work, nodePort: 30090}

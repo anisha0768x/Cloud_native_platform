@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7fa">
+  <title>Helio Operations</title>
+  <link rel="stylesheet" href="/styles.css?v=3">
+  <script src="/app.js?v=3" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <section id="login" class="login-shell">
+    <div class="login-panel">
+      <div class="wordmark"><span class="mark" aria-hidden="true">✦</span>helio<span>ops</span></div>
+      <p class="eyebrow">CLOUD OPERATIONS WORKSPACE</p>
+      <h1>Operate with<br><em>evidence.</em></h1>
+      <p class="login-copy">Observe real requests. Investigate incidents. Verify every action.</p>
+      <form id="login-form" hidden>
+        <h2>Sign in</h2>
+        <label>Email<input name="email" type="email" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <label>Authenticator code <span class="optional">if enabled</span><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"></label>
+        <button class="primary" type="submit">Enter workspace <span aria-hidden="true">→</span></button>
+        <p class="form-error" role="alert"></p>
+      </form>
+      <form id="setup-form" hidden>
+        <h2>Create your administrator account</h2>
+        <label>Your name<input name="name" required minlength="2" maxlength="80" autocomplete="name"></label>
+        <label>Email<input name="email" type="email" required autocomplete="username"></label>
+        <label>Password <span class="optional">at least 12 characters</span><input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
+        <label>Server setup token <span class="optional">current token from this project</span><input name="setup_token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required maxlength="200" aria-describedby="setup-token-help"><span class="optional" id="setup-token-help">Paste the token printed in your project terminal. Use the new token after a recovery.</span></label>
+        <button class="primary" type="submit">Create workspace <span aria-hidden="true">→</span></button>
+        <p class="form-error" role="alert"></p>
+      </form>
+      <p id="boot-message" role="status">Connecting to the operations API…</p>
+    </div>
+    <aside class="login-aside" aria-label="Platform capabilities">
+      <div class="orbit" aria-hidden="true"></div>
+      <p class="eyebrow">COLLECT / UNDERSTAND / ACT</p>
+      <h2>Every number<br>has a source.</h2>
+      <p>Measured telemetry, accountable operations, and a clear record of what changed.</p>
+      <div class="login-facts"><span>01 / Observe</span><span>02 / Investigate</span><span>03 / Verify</span></div>
+    </aside>
+  </section>
+  <div id="app" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="wordmark"><span class="mark" aria-hidden="true">✦</span>helio<span>ops</span></div>
+      <div class="workspace"><strong>Operations</strong><span id="runtime-label">Operations workspace</span></div>
+      <nav aria-label="Main navigation">
+        <p>OVERVIEW</p>
+        <a href="#overview" data-page="overview">Command center</a>
+        <a href="#services" data-page="services">Services</a>
+        <p>OPERATE</p>
+        <a href="#incidents" data-page="incidents">Incidents</a>
+        <a href="#capacity" data-page="capacity">Capacity & workloads</a>
+        <a href="#logs" data-page="logs">Log intelligence</a>
+        <a href="#predict" data-page="predict">Forecasts</a>
+        <a href="#notifications" data-page="notifications">Notifications <span id="notice-count" class="nav-count">0</span></a>
+        <p>GOVERN</p>
+        <a href="#storage" data-page="storage">Object storage</a>
+        <a href="#costs" data-page="costs">Cost & service levels</a>
+        <a href="#security" data-page="security">Identity & security</a>
+        <a href="#network" data-page="network">Connections</a>
+        <a href="#recovery" data-page="recovery">Backup & recovery</a>
+        <a href="#audit" data-page="audit">Audit trail</a>
+        <a href="#settings" data-page="settings">Workspace</a>
+      </nav>
+      <div class="sidebar-foot"><p id="system-status">Checking measured health</p><div class="account"><span class="avatar" id="avatar">H</span><div><b id="account-name"></b><small id="account-role"></small></div><button class="icon-btn" id="logout" aria-label="Sign out" title="Sign out">↪</button></div></div>
+    </aside>
+    <button id="mobile-shade" aria-label="Close navigation" hidden></button>
+    <main>
+      <header>
+        <button id="mobile-menu" class="icon-btn" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div><p class="crumb">HELIO / OPERATIONS</p><h2 id="page-title">Command center</h2></div>
+        <div class="header-actions"><span id="freshness" role="status">Connecting</span><button id="search" class="icon-btn" aria-label="Search services and incidents" title="Search (Ctrl+K)">⌕</button><button id="refresh" class="quiet-btn">Refresh</button></div>
+      </header>
+      <section id="content" tabindex="-1" aria-busy="false"></section>
+    </main>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button class="icon-btn" id="dialog-close" aria-label="Close dialog">×</button></div><div id="dialog-body"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,4 @@
+name: helio-v3
+include:
+  - path: ./distributed/compose.yaml
+    env_file: ./distributed/.env

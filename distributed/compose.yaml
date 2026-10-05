@@ -1,0 +1,765 @@
+{
+  "name": "${COMPOSE_PROJECT_NAME}",
+  "services": {
+    "postgres": {
+      "image": "postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929",
+      "environment": {
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "POSTGRES_DB": "postgres",
+        "GATEWAY_DB_PASSWORD": "${GATEWAY_DB_PASSWORD}",
+        "AUTH_DB_PASSWORD": "${AUTH_DB_PASSWORD}",
+        "CATALOG_DB_PASSWORD": "${CATALOG_DB_PASSWORD}",
+        "METRICS_DB_PASSWORD": "${METRICS_DB_PASSWORD}",
+        "CAPACITY_DB_PASSWORD": "${CAPACITY_DB_PASSWORD}",
+        "LOGS_DB_PASSWORD": "${LOGS_DB_PASSWORD}",
+        "FORECAST_DB_PASSWORD": "${FORECAST_DB_PASSWORD}",
+        "MAINTENANCE_DB_PASSWORD": "${MAINTENANCE_DB_PASSWORD}",
+        "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}",
+        "STORAGE_DB_PASSWORD": "${STORAGE_DB_PASSWORD}",
+        "CONFIGURATION_DB_PASSWORD": "${CONFIGURATION_DB_PASSWORD}",
+        "DASHBOARD_DB_PASSWORD": "${DASHBOARD_DB_PASSWORD}"
+      },
+      "volumes": [
+        "postgres-data:/var/lib/postgresql/data",
+        "./infra/postgres-init.sh:/docker-entrypoint-initdb.d/01-services.sh:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U postgres"
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 20
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped"
+    },
+    "kafka-volume": {
+      "image": "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+      "user": "0:0",
+      "command": [
+        "sh",
+        "-c",
+        "chown -R 1000:1000 /data"
+      ],
+      "volumes": [
+        "kafka-data:/data"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "restart": "no"
+    },
+    "kafka": {
+      "image": "apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75",
+      "environment": {
+        "KAFKA_NODE_ID": "1",
+        "KAFKA_PROCESS_ROLES": "broker,controller",
+        "KAFKA_LISTENERS": "PLAINTEXT://:9092,CONTROLLER://:9093",
+        "KAFKA_ADVERTISED_LISTENERS": "PLAINTEXT://kafka:9092",
+        "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
+        "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER",
+        "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@kafka:9093",
+        "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+        "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+        "KAFKA_NUM_PARTITIONS": "3",
+        "KAFKA_LOG_RETENTION_HOURS": "168",
+        "KAFKA_LOG_DIRS": "/tmp/kraft-combined-logs",
+        "KAFKA_HEAP_OPTS": "-Xms256M -Xmx512M"
+      },
+      "volumes": [
+        "kafka-data:/tmp/kraft-combined-logs"
+      ],
+      "depends_on": {
+        "kafka-volume": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"
+        ],
+        "interval": "10s",
+        "timeout": "10s",
+        "retries": 20
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped"
+    },
+    "kafka-topics": {
+      "image": "apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75",
+      "entrypoint": [
+        "/bin/bash",
+        "-c"
+      ],
+      "command": [
+        "for topic in requests.observed metrics.observed incidents.opened services.registered audit.events events.failed; do /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic \"$$topic\" --partitions 3 --replication-factor 1; done"
+      ],
+      "depends_on": {
+        "kafka": {
+          "condition": "service_healthy"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "no"
+    },
+    "objects": {
+      "image": "chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882",
+      "command": [
+        "mini",
+        "-dir=/data",
+        "-ip=objects",
+        "-ip.bind=0.0.0.0"
+      ],
+      "environment": {
+        "AWS_ACCESS_KEY_ID": "${S3_ACCESS_KEY}",
+        "AWS_SECRET_ACCESS_KEY": "${S3_SECRET_KEY}",
+        "S3_BUCKET": "helio-objects"
+      },
+      "volumes": [
+        "object-data:/data"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped"
+    },
+    "mailpit": {
+      "image": "axllent/mailpit:v1.27.4@sha256:df6c2541907e1be6fac21f509927cf6ed771617a1f4b361ef66d97bd05593d2d",
+      "ports": [
+        "127.0.0.1:${MAIL_PORT:-8025}:8025"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped"
+    },
+    "gateway": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "gateway",
+        "DATABASE_URL": "postgresql://helio_gateway:${GATEWAY_DB_PASSWORD}@postgres:5432/helio_gateway",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      },
+      "ports": [
+        "127.0.0.1:${HELIO_PORT:-8080}:8000"
+      ]
+    },
+    "auth": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "auth",
+        "DATABASE_URL": "postgresql://helio_auth:${AUTH_DB_PASSWORD}@postgres:5432/helio_auth",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092",
+        "AUTH_ENCRYPTION_KEY": "${AUTH_ENCRYPTION_KEY}",
+        "SETUP_TOKEN": "${SETUP_TOKEN}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "catalog": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "catalog",
+        "DATABASE_URL": "postgresql://helio_catalog:${CATALOG_DB_PASSWORD}@postgres:5432/helio_catalog",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "metrics": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "metrics",
+        "DATABASE_URL": "postgresql://helio_metrics:${METRICS_DB_PASSWORD}@postgres:5432/helio_metrics",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "capacity": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "capacity",
+        "DATABASE_URL": "postgresql://helio_capacity:${CAPACITY_DB_PASSWORD}@postgres:5432/helio_capacity",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092",
+        "RUNTIME": "docker",
+        "WORKSPACE_ID": "${COMPOSE_PROJECT_NAME}-workloads",
+        "WORKLOAD_NETWORK": "${COMPOSE_PROJECT_NAME}-workloads",
+        "WORKLOAD_IMAGE": "helio-worker:v3"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend",
+        "workloads"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      },
+      "user": "0:0",
+      "volumes": [
+        "/var/run/docker.sock:/var/run/docker.sock"
+      ]
+    },
+    "logs": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "logs",
+        "DATABASE_URL": "postgresql://helio_logs:${LOGS_DB_PASSWORD}@postgres:5432/helio_logs",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "forecast": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "forecast",
+        "DATABASE_URL": "postgresql://helio_forecast:${FORECAST_DB_PASSWORD}@postgres:5432/helio_forecast",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "maintenance": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "maintenance",
+        "DATABASE_URL": "postgresql://helio_maintenance:${MAINTENANCE_DB_PASSWORD}@postgres:5432/helio_maintenance",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "notifications": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "notifications",
+        "DATABASE_URL": "postgresql://helio_notifications:${NOTIFICATIONS_DB_PASSWORD}@postgres:5432/helio_notifications",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092",
+        "SMTP_HOST": "mailpit",
+        "SMTP_PORT": "1025",
+        "SMTP_FROM": "helio@localhost",
+        "SMTP_TO": "operator@localhost",
+        "SMTP_USER": "",
+        "SMTP_PASSWORD": "",
+        "SLACK_WEBHOOK": "",
+        "NOTIFICATION_WEBHOOK": ""
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "storage": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "storage",
+        "DATABASE_URL": "postgresql://helio_storage:${STORAGE_DB_PASSWORD}@postgres:5432/helio_storage",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092",
+        "S3_ENDPOINT": "${S3_ENDPOINT:-http://objects:8333}",
+        "S3_ACCESS_KEY": "${S3_ACCESS_KEY}",
+        "S3_SECRET_KEY": "${S3_SECRET_KEY}",
+        "S3_BUCKET": "${S3_BUCKET:-helio-objects}",
+        "STORAGE_ENCRYPTION_KEY": "${STORAGE_ENCRYPTION_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        },
+        "objects": {
+          "condition": "service_started"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "configuration": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "configuration",
+        "DATABASE_URL": "postgresql://helio_configuration:${CONFIGURATION_DB_PASSWORD}@postgres:5432/helio_configuration",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    },
+    "dashboard": {
+      "image": "helio-platform:v3",
+      "build": {
+        "context": "..",
+        "dockerfile": "distributed/Dockerfile"
+      },
+      "environment": {
+        "HELIO_SERVICE": "dashboard",
+        "DATABASE_URL": "postgresql://helio_dashboard:${DASHBOARD_DB_PASSWORD}@postgres:5432/helio_dashboard",
+        "INTERNAL_SECRET": "${INTERNAL_SECRET}",
+        "KAFKA_BOOTSTRAP": "kafka:9092"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "kafka-topics": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "networks": [
+        "backend"
+      ],
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:size=64m"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "pids_limit": 128,
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "start_period": "45s",
+        "retries": 5
+      }
+    }
+  },
+  "networks": {
+    "backend": {},
+    "workloads": {
+      "name": "${COMPOSE_PROJECT_NAME}-workloads"
+    }
+  },
+  "volumes": {
+    "postgres-data": {},
+    "kafka-data": {},
+    "object-data": {}
+  }
+}

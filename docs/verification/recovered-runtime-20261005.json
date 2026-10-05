@@ -1,0 +1,60 @@
+{
+  "services": [
+    {
+      "service": "gateway",
+      "status": "ready"
+    },
+    {
+      "service": "auth",
+      "status": "ready"
+    },
+    {
+      "service": "catalog",
+      "status": "ready"
+    },
+    {
+      "service": "metrics",
+      "status": "ready"
+    },
+    {
+      "service": "capacity",
+      "status": "ready"
+    },
+    {
+      "service": "logs",
+      "status": "ready"
+    },
+    {
+      "service": "forecast",
+      "status": "ready"
+    },
+    {
+      "service": "maintenance",
+      "status": "ready"
+    },
+    {
+      "service": "notifications",
+      "status": "ready"
+    },
+    {
+      "service": "storage",
+      "status": "ready"
+    },
+    {
+      "service": "configuration",
+      "status": "ready"
+    },
+    {
+      "service": "dashboard",
+      "status": "ready"
+    }
+  ],
+  "old_database_password_rejected": true,
+  "old_s3_secret_rejected": true,
+  "administrator_setup_required": true,
+  "website_http_status": 200,
+  "encryption_keys_preserved": true,
+  "data_volumes_deleted": false,
+  "normal_build_and_start_passed": true,
+  "stop_and_restart_passed": true
+}

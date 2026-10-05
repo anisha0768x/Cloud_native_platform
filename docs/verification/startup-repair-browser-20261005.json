@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-05",
+  "method": "Codex browser UI, isolated local deployment",
+  "base_url": "http://127.0.0.1:8090",
+  "sections_loaded": [
+    "Command center",
+    "Services",
+    "Incidents",
+    "Capacity & workloads",
+    "Log intelligence",
+    "Forecasts",
+    "Notifications",
+    "Object storage",
+    "Cost & service levels",
+    "Identity & security",
+    "Connections",
+    "Backup & recovery",
+    "Audit trail",
+    "Workspace"
+  ],
+  "javascript_errors_observed": [],
+  "sign_in": "passed",
+  "sign_out": "passed",
+  "scaling": {
+    "previous": 2,
+    "requested": 1,
+    "observed": 1,
+    "result": "verified"
+  },
+  "workload": {
+    "requests": 20,
+    "completed": 20,
+    "errors": 0
+  },
+  "main_website": {
+    "url": "http://127.0.0.1:8080",
+    "administrator_setup_form": "visible"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "time": "2026-10-01T11:39:10.893823+00:00",
+  "project": "helio-verify-zip",
+  "checks": [
+    "Source ZIP integrity and all per-file SHA-256 hashes verified",
+    "No generated environment file or secrets packaged",
+    "Worker and platform images built from the clean extracted source folder",
+    "Launcher initialized separate fresh PostgreSQL, Kafka and S3 volumes",
+    "New installation required first-administrator setup; no bundled account",
+    "Administrator setup, login and authenticated gateway succeeded",
+    "All twelve services reported ready",
+    "Every packaged backend/frontend file matches the running build used for the 18 integration and 21 browser checks"
+  ],
+  "runtime_source_files_matched": 23,
+  "note": "Verification documentation/report files may be updated after this check; runtime source equality is validated again when assembling the final ZIP."
+}

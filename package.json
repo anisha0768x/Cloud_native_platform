@@ -1,0 +1,11 @@
+{
+  "name": "helio-operations",
+  "private": true,
+  "version": "3.0.0",
+  "scripts": {
+    "test:e2e": "node distributed/tests/browser.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
