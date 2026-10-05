@@ -275,8 +275,8 @@ class Controller:
                 row.update(status="failed", error=type(exc).__name__, finished=time.time())
             finally:
                 with self.lock:
-                    self.db.put("runs", key, row)
                     self.active_job = None
+                    self.db.put("runs", key, row)
 
         thread = threading.Thread(target=run, daemon=True)
         self.ctx.threads.append(thread)

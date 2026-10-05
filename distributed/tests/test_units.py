@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from helio.services import auth, capacity, catalog, forecast
 from helio.services.forecast import predict
 from helio.runtime import DockerRuntime, KubernetesRuntime
-from helio.contracts import Autoscale
+from helio.contracts import Autoscale, Load
 
 
 class MemoryDB:
@@ -350,6 +350,39 @@ def controller(monkeypatch):
     db = MemoryDB()
     ctx = SimpleNamespace(db=db, threads=[])
     return capacity.Controller(ctx), driver
+
+
+def test_completed_workload_is_no_longer_busy_when_result_is_visible(monkeypatch):
+    c, _ = controller(monkeypatch)
+    c.workers = [{"endpoint": "http://worker:9090", "ready": True}]
+    completed_busy_states = []
+    original_put = c.db.put
+
+    def put(collection, key, row):
+        if collection == "runs" and row["status"] == "completed":
+            completed_busy_states.append(c.active_job)
+        return original_put(collection, key, row)
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def post(self, *args, **kwargs):
+            return SimpleNamespace(status_code=200, content=b"ok")
+
+    monkeypatch.setattr(c.db, "put", put)
+    monkeypatch.setattr(capacity.httpx, "Client", Client)
+    result = c.load(Load(total=10, concurrency=2, work_ms=1), "test@example.com")
+    c.ctx.threads[-1].join(timeout=5)
+    assert not c.ctx.threads[-1].is_alive()
+    assert c.db.get("runs", result["id"])["status"] == "completed"
+    assert completed_busy_states == [None]
 
 
 def test_autoscaler_requires_consecutive_samples_and_respects_cooldown(monkeypatch):
