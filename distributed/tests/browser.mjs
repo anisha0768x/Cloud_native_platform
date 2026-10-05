@@ -73,7 +73,20 @@ try {
   await page.locator('[data-form=load] button[type=submit]').click();
   const load=await (await loadResponse).json();
   assert(load.id,'Workload request was not accepted');
-  await page.waitForFunction(async id=>{const d=await (await fetch('/api/workload/runs')).json();return d.runs.some(r=>r.id===id&&r.status==='completed');},load.id,{timeout:45000});
+  let workloadState;
+  const workloadDeadline=Date.now()+60000;
+  do {
+    workloadState=await page.evaluate(async id=>{
+      const response=await fetch('/api/workload/runs',{cache:'no-store'});
+      if(!response.ok)return {http:response.status};
+      const data=await response.json();
+      return {busy:data.busy,run:data.runs.find(run=>run.id===id)};
+    },load.id);
+    if(workloadState.busy===false&&workloadState.run?.status==='completed')break;
+    if(workloadState.run?.status==='failed')throw new Error('Workload failed: '+JSON.stringify(workloadState.run));
+    await new Promise(resolve=>setTimeout(resolve,250));
+  } while(Date.now()<workloadDeadline);
+  assert(workloadState.busy===false&&workloadState.run?.status==='completed','Workload did not become idle: '+JSON.stringify(workloadState));
   report.checks.push('Browser scaling and real workload execution');
   await view('storage');
   const bytes=Buffer.from('Browser S3 round-trip '+Date.now());

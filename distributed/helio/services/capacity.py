@@ -346,7 +346,9 @@ def install(app):
     @app.get("/api/workload/runs")
     def runs(request: Request):
         actor(request)
-        return {"runs": controller().db.rows("runs", 20)}
+        c = controller()
+        with c.lock:
+            return {"runs": c.db.rows("runs", 20), "busy": bool(c.active_job)}
 
     @app.get("/internal/busy")
     def busy():
