@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from helio.services import auth, capacity, catalog, forecast
 from helio.services.forecast import predict
-from helio.runtime import DockerRuntime, KubernetesRuntime
+from helio.runtime import DockerRuntime, ECSRuntime, KubernetesRuntime
 from helio.contracts import Autoscale, Load
 
 
@@ -314,6 +314,45 @@ def test_running_docker_container_is_not_ready_if_health_fails(monkeypatch):
 
     monkeypatch.setattr("helio.runtime.httpx.Client", HTTP)
     assert runtime.inventory()[0]["ready"] is False
+
+
+def test_ecs_runtime_reports_only_completed_primary_deployment():
+    runtime = ECSRuntime.__new__(ECSRuntime)
+    runtime.cluster = "helio"
+    runtime.service = "workload"
+
+    class ECS:
+        def describe_services(self, **kwargs):
+            return {
+                "failures": [],
+                "services": [
+                    {
+                        "desiredCount": 2,
+                        "runningCount": 2,
+                        "pendingCount": 0,
+                        "deployments": [
+                            {"id": "ecs-svc/1", "status": "PRIMARY", "rolloutState": "COMPLETED"}
+                        ],
+                    }
+                ],
+            }
+
+    runtime.client = ECS()
+    state = runtime.state()
+    assert state["desired"] == 2
+    assert state["observed"] == 2
+    assert state["converged"] is True
+
+
+def test_ecs_runtime_rejects_missing_service():
+    runtime = ECSRuntime.__new__(ECSRuntime)
+    runtime.cluster = "helio"
+    runtime.service = "missing"
+    runtime.client = SimpleNamespace(
+        describe_services=lambda **kwargs: {"services": [], "failures": [{"reason": "MISSING"}]}
+    )
+    with pytest.raises(RuntimeError, match="unavailable"):
+        runtime.state()
 
 
 class Driver:

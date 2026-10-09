@@ -22,6 +22,44 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from confluent_kafka import Producer, Consumer, KafkaException
 
+
+def service_url(service):
+    template = os.environ.get("SERVICE_URL_TEMPLATE", "http://{service}:8000")
+    try:
+        return template.format(service=service).rstrip("/")
+    except (KeyError, ValueError) as exc:
+        raise RuntimeError(
+            "SERVICE_URL_TEMPLATE must contain a valid {service} placeholder"
+        ) from exc
+
+
+def kafka_config():
+    config = {"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"]}
+    protocol = os.environ.get("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+    config["security.protocol"] = protocol
+    mechanism = os.environ.get("KAFKA_SASL_MECHANISM")
+    if mechanism:
+        config["sasl.mechanism"] = mechanism
+    if mechanism == "OAUTHBEARER":
+        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
+
+        region = os.environ.get("AWS_REGION")
+        if not region:
+            raise RuntimeError("AWS_REGION is required for MSK IAM authentication")
+
+        def oauth_cb(_):
+            token, expiry_ms = MSKAuthTokenProvider.generate_auth_token(region)
+            return token, expiry_ms / 1000
+
+        config["oauth_cb"] = oauth_cb
+    elif mechanism:
+        config["sasl.username"] = os.environ["KAFKA_SASL_USERNAME"]
+        config["sasl.password"] = os.environ["KAFKA_SASL_PASSWORD"]
+    if os.environ.get("KAFKA_SSL_CA_LOCATION"):
+        config["ssl.ca.location"] = os.environ["KAFKA_SSL_CA_LOCATION"]
+    return config
+
+
 NAMES = (
     "gateway",
     "auth",
@@ -67,8 +105,8 @@ class Database:
     def __init__(self):
         self.pool = ConnectionPool(
             os.environ["DATABASE_URL"],
-            min_size=1,
-            max_size=5,
+            min_size=int(os.environ.get("DB_POOL_MIN", "1")),
+            max_size=int(os.environ.get("DB_POOL_MAX", "5")),
             kwargs={"row_factory": dict_row},
             open=True,
         )
@@ -167,7 +205,7 @@ def rpc(service, path, method="GET", body=None, actor=None, timeout=8, raw=False
     try:
         with httpx.Client(timeout=timeout, trust_env=False) as client:
             response = client.request(
-                method, "http://" + service + ":8000" + path, headers=headers, json=body
+                method, service_url(service) + path, headers=headers, json=body
             )
     except httpx.HTTPError:
         fail(503, service + " service is unavailable; retry after its connection recovers.")
@@ -196,8 +234,8 @@ class Events:
     def __init__(self, ctx, topics, handler):
         self.ctx, self.topics, self.handler = ctx, topics, handler
         self.producer = Producer(
-            {
-                "bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"],
+            kafka_config()
+            | {
                 "message.timeout.ms": 5000,
                 "enable.idempotence": True,
                 "acks": "all",
@@ -243,8 +281,8 @@ class Events:
             return
         if self.consumer is None:
             self.consumer = Consumer(
-                {
-                    "bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"],
+                kafka_config()
+                | {
                     "group.id": "helio-v3-" + self.ctx.name,
                     "auto.offset.reset": "earliest",
                     "enable.auto.commit": False,
@@ -328,7 +366,7 @@ class Context:
         self.activity = threading.Condition()
         self.active_steps = 0
 
-    def background(self, fn, interval, label):
+    def background(self, fn, interval, label, singleton=False):
         def loop():
             while not self.stop.wait(interval):
                 with self.activity:
@@ -336,7 +374,18 @@ class Context:
                         continue
                     self.active_steps += 1
                 try:
-                    fn()
+                    if singleton:
+                        with self.db.pool.connection() as leader:
+                            with leader.transaction():
+                                locked = leader.execute(
+                                    "SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS locked",
+                                    ("helio:" + self.name + ":" + label,),
+                                ).fetchone()["locked"]
+                                if not locked:
+                                    continue
+                                fn()
+                    else:
+                        fn()
                     self.workers[label] = {"last_success": stamp(), "error": None}
                     if label == "collection":
                         self.tick_error = None
@@ -369,17 +418,17 @@ def service_app(name, install, topics=(), handler=None, tick=None):
         if hasattr(app.state, "initialize"):
             app.state.initialize(ctx)
         # Kafka publishing and consuming are independent of application collection/delivery.
-        ctx.background(ctx.events.publish, 0.3, "publisher")
+        ctx.background(ctx.events.publish, 0.3, "publisher", singleton=True)
         if topics:
             ctx.background(ctx.events.consume, 0.01, "consumer")
         if tick:
-            ctx.background(lambda: tick(ctx), 2, "collection")
+            ctx.background(lambda: tick(ctx), 2, "collection", singleton=True)
 
         def prune_events():
             ctx.db.sql("DELETE FROM outbox WHERE sent<%s", (time.time() - 8 * 86400,))
             ctx.db.sql("DELETE FROM inbox WHERE received<%s", (time.time() - 8 * 86400,))
 
-        ctx.background(prune_events, 600, "event-retention")
+        ctx.background(prune_events, 600, "event-retention", singleton=True)
         yield
         ctx.stop.set()
         for thread in ctx.threads:

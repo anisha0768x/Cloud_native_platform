@@ -5,6 +5,7 @@ import ssl
 import time
 from urllib.parse import urlparse
 import httpx
+import boto3
 from fastapi import Request
 from helio.common import actor, fail, rpc, service_app, stamp, uid
 from helio.contracts import NotificationRequest
@@ -15,8 +16,8 @@ def channels():
         {"name": "inbox", "configured": True, "description": "Persistent workspace inbox"},
         {
             "name": "email",
-            "configured": bool(os.environ.get("SMTP_HOST")),
-            "description": "SMTP capture in Mailpit locally; external SMTP can be configured",
+            "configured": bool(os.environ.get("SMTP_HOST") or os.environ.get("SES_FROM")),
+            "description": "Amazon SES in AWS; SMTP capture in Mailpit locally",
         },
         {
             "name": "slack",
@@ -71,10 +72,29 @@ def tick(ctx):
         message = f"Helio incident: {row['title']} — {row['service']} — {row['incident_id']}"
         try:
             if row["channel"] == "email":
+                sender = os.environ.get("SES_FROM", os.environ.get("SMTP_FROM", "helio@localhost"))
+                recipient = os.environ.get(
+                    "SES_TO", os.environ.get("SMTP_TO", "operator@localhost")
+                )
+                if os.environ.get("EMAIL_PROVIDER") == "ses":
+                    boto3.client("sesv2", region_name=os.environ.get("AWS_REGION")).send_email(
+                        FromEmailAddress=sender,
+                        Destination={"ToAddresses": [recipient]},
+                        Content={
+                            "Simple": {
+                                "Subject": {"Data": "Helio incident notification"},
+                                "Body": {"Text": {"Data": message}},
+                            }
+                        },
+                    )
+                    row["status"] = "accepted"
+                    row.update(delivered_at=stamp(), error=None)
+                    ctx.db.put("notices", row["id"], row)
+                    continue
                 mail = EmailMessage()
                 mail["Subject"] = "Helio incident notification"
-                mail["From"] = os.environ.get("SMTP_FROM", "helio@localhost")
-                mail["To"] = os.environ.get("SMTP_TO", "operator@localhost")
+                mail["From"] = sender
+                mail["To"] = recipient
                 mail["Message-ID"] = "<" + row["id"].replace(":", ".") + "@helio.local>"
                 mail.set_content(message)
                 host = os.environ["SMTP_HOST"]
