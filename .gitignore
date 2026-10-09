@@ -16,3 +16,9 @@ node_modules/
 *.generated.yaml
 
 .recovery/
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

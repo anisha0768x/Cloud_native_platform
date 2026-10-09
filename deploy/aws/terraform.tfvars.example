@@ -1,0 +1,15 @@
+aws_region            = "ap-south-1"
+name                  = "helio-production"
+image_tag             = "REPLACE_WITH_GIT_SHA"
+domain_name           = "operations.example.com"
+route53_zone_id       = "Z0123456789EXAMPLE"
+certificate_arn       = "arn:aws:acm:ap-south-1:123456789012:certificate/REPLACE_ME"
+ses_from              = "alerts@example.com"
+ses_to                = "operator@example.com"
+db_instance_class     = "db.t4g.small"
+db_multi_az           = true
+deletion_protection   = true
+bootstrap_complete    = false
+gateway_desired_count = 2
+service_desired_count = 1
+enable_waf             = true

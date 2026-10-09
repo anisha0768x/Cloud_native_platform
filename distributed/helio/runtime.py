@@ -1,4 +1,4 @@
-"""Scoped Docker control and generation-aware Kubernetes deployment management."""
+"""Scoped Docker, Kubernetes, and Amazon ECS workload management."""
 
 import json
 import os
@@ -6,6 +6,7 @@ import ssl
 import time
 from urllib.parse import quote
 import httpx
+import boto3
 
 
 class DockerRuntime:
@@ -156,5 +157,61 @@ class KubernetesRuntime:
             return False
         try:
             return self.client.get(self.workload_url + "/health").status_code == 200
+        except httpx.HTTPError:
+            return False
+
+
+class ECSRuntime:
+    """Manage a single ECS workload service using the task role attached to this service."""
+
+    def __init__(self):
+        self.cluster = os.environ["ECS_CLUSTER"]
+        self.service = os.environ["ECS_WORKLOAD_SERVICE"]
+        self.workload_url = os.environ["ECS_WORKLOAD_URL"].rstrip("/")
+        self.timeout = int(os.environ.get("ECS_SCALE_TIMEOUT_SECONDS", "180"))
+        self.client = boto3.client("ecs", region_name=os.environ.get("AWS_REGION"))
+
+    def _service(self):
+        response = self.client.describe_services(cluster=self.cluster, services=[self.service])
+        failures = response.get("failures", [])
+        services = response.get("services", [])
+        if failures or len(services) != 1:
+            raise RuntimeError("The configured ECS workload service is unavailable")
+        return services[0]
+
+    def state(self):
+        service = self._service()
+        deployment = next(
+            (row for row in service.get("deployments", []) if row.get("status") == "PRIMARY"),
+            {},
+        )
+        desired = service.get("desiredCount", 0)
+        running = service.get("runningCount", 0)
+        pending = service.get("pendingCount", 0)
+        return {
+            "desired": desired,
+            "observed": running,
+            "pending": pending,
+            "deployment_id": deployment.get("id"),
+            "rollout_state": deployment.get("rolloutState"),
+            "converged": running == desired
+            and pending == 0
+            and deployment.get("rolloutState") == "COMPLETED",
+        }
+
+    def scale(self, count):
+        self.client.update_service(cluster=self.cluster, service=self.service, desiredCount=count)
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            state = self.state()
+            if state["desired"] == count and state["converged"]:
+                return state
+            time.sleep(2)
+        raise RuntimeError("ECS did not reach the requested ready task count before timeout")
+
+    def health(self):
+        try:
+            with httpx.Client(timeout=3, trust_env=False) as client:
+                return client.get(self.workload_url + "/health").status_code == 200
         except httpx.HTTPError:
             return False

@@ -1,0 +1,107 @@
+name: aws-production-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type DEPLOY to provision/update AWS and deploy this commit"
+        required: true
+      bootstrap_complete:
+        description: "Enable application services after the bootstrap task has succeeded"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.confirm == 'DEPLOY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_name: ${{ vars.AWS_STACK_NAME }}
+      TF_VAR_domain_name: ${{ vars.AWS_DOMAIN_NAME }}
+      TF_VAR_route53_zone_id: ${{ vars.AWS_ROUTE53_ZONE_ID }}
+      TF_VAR_certificate_arn: ${{ vars.AWS_CERTIFICATE_ARN }}
+      TF_VAR_ses_from: ${{ vars.AWS_SES_FROM }}
+      TF_VAR_ses_to: ${{ vars.AWS_SES_TO }}
+      TF_VAR_image_tag: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: Initialize Terraform
+        working-directory: deploy/aws
+        run: terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="key=helio/production.tfstate" -backend-config="region=${AWS_REGION}"
+      - name: Validate
+        working-directory: deploy/aws
+        run: terraform validate
+      - name: Plan initial infrastructure
+        if: inputs.bootstrap_complete == false
+        working-directory: deploy/aws
+        run: terraform plan -var=bootstrap_complete=false -out=tfplan
+      - name: Apply initial infrastructure
+        if: inputs.bootstrap_complete == false
+        working-directory: deploy/aws
+        run: terraform apply -auto-approve tfplan
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push immutable images
+        shell: bash
+        run: |
+          platform_repo=$(terraform -chdir=deploy/aws output -raw platform_repository)
+          workload_repo=$(terraform -chdir=deploy/aws output -raw workload_repository)
+          platform_name=${platform_repo#*/}
+          workload_name=${workload_repo#*/}
+          if ! aws ecr describe-images --repository-name "$platform_name" --image-ids "imageTag=${GITHUB_SHA}" >/dev/null 2>&1; then
+            docker build --pull -t "$platform_repo:${GITHUB_SHA}" -f distributed/Dockerfile .
+            docker push "$platform_repo:${GITHUB_SHA}"
+          fi
+          if ! aws ecr describe-images --repository-name "$workload_name" --image-ids "imageTag=${GITHUB_SHA}" >/dev/null 2>&1; then
+            docker build --pull -t "$workload_repo:${GITHUB_SHA}" services/workload
+            docker push "$workload_repo:${GITHUB_SHA}"
+          fi
+      - name: Plan application deployment
+        if: inputs.bootstrap_complete == true
+        working-directory: deploy/aws
+        run: terraform plan -var=bootstrap_complete=true -out=tfplan
+      - name: Deploy application services
+        if: inputs.bootstrap_complete == true
+        working-directory: deploy/aws
+        run: terraform apply -auto-approve tfplan
+      - name: Bootstrap databases and topics
+        if: inputs.bootstrap_complete == false
+        shell: bash
+        run: |
+          cluster=$(terraform -chdir=deploy/aws output -raw ecs_cluster)
+          task=$(terraform -chdir=deploy/aws output -raw bootstrap_task_definition)
+          subnets=$(terraform -chdir=deploy/aws output -json private_subnet_ids | jq -r 'join(",")')
+          security_group=$(terraform -chdir=deploy/aws output -raw task_security_group_id)
+          task_arn=$(aws ecs run-task --cluster "$cluster" --task-definition "$task" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$security_group],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text)
+          test "$task_arn" != "None"
+          aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task_arn" --query 'tasks[0].containers[0].exitCode' --output text)
+          test "$exit_code" = "0"
+      - name: Wait for application stability
+        if: inputs.bootstrap_complete == true
+        shell: bash
+        run: |
+          cluster=$(terraform -chdir=deploy/aws output -raw ecs_cluster)
+          for service in gateway auth catalog metrics capacity logs forecast maintenance notifications storage configuration dashboard workload; do
+            aws ecs wait services-stable --cluster "$cluster" --services "${TF_VAR_name}-${service}"
+          done

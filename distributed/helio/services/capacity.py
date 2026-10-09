@@ -7,7 +7,7 @@ import httpx
 from fastapi import Request
 from helio.common import actor, fail, rpc, service_app, stamp, uid
 from helio.contracts import Autoscale, Scale, Load
-from helio.runtime import DockerRuntime, KubernetesRuntime
+from helio.runtime import DockerRuntime, ECSRuntime, KubernetesRuntime
 
 
 def percentile(values):
@@ -28,7 +28,10 @@ class Controller:
         self.low = 0
         self.error = None
         self.mode = os.environ.get("RUNTIME", "docker")
-        self.driver = KubernetesRuntime() if self.mode == "kubernetes" else DockerRuntime()
+        drivers = {"docker": DockerRuntime, "kubernetes": KubernetesRuntime, "ecs": ECSRuntime}
+        if self.mode not in drivers:
+            raise RuntimeError("RUNTIME must be docker, kubernetes, or ecs")
+        self.driver = drivers[self.mode]()
         self.desired = self.db.get("policy", "capacity", {"replicas": 1})["replicas"]
         if not self.db.get("policy", "autoscale"):
             self.db.put("policy", "autoscale", Autoscale().model_dump())
@@ -40,15 +43,19 @@ class Controller:
 
     def state(self):
         with self.lock:
-            if self.mode == "kubernetes":
+            if self.mode in {"kubernetes", "ecs"}:
                 try:
                     data = self.driver.state()
                     ready = self.driver.health()
                     self.error = None
                     return data | {
-                        "backend": "kubernetes",
-                        "deployment": self.driver.deployment,
-                        "namespace": self.driver.namespace,
+                        "backend": self.mode,
+                        "deployment": getattr(
+                            self.driver, "deployment", getattr(self.driver, "service", None)
+                        ),
+                        "namespace": getattr(
+                            self.driver, "namespace", getattr(self.driver, "cluster", None)
+                        ),
                         "connected": True,
                         "workload_connected": ready,
                         "error": None,
@@ -101,7 +108,7 @@ class Controller:
                 self.error = None
                 after = self.state()
                 verified = after["observed"] == replicas and (
-                    self.mode != "kubernetes" or after["converged"] and after["workload_connected"]
+                    self.mode == "docker" or after["converged"] and after["workload_connected"]
                 )
                 row.update(observed=after["observed"], status="verified" if verified else "pending")
                 for old in self.db.rows("actions", 100, {"status": "pending"}):
@@ -184,9 +191,9 @@ class Controller:
 
     def endpoint(self):
         with self.lock:
-            if self.mode == "kubernetes":
+            if self.mode in {"kubernetes", "ecs"}:
                 if not self.driver.workload_url:
-                    fail(503, "Configure the Kubernetes workload service URL.")
+                    fail(503, "Configure the managed workload service URL.")
                 return self.driver.workload_url
             ready = [w for w in self.workers if w["ready"]]
             if not ready:

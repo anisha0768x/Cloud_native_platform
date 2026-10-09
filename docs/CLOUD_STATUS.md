@@ -1,6 +1,6 @@
 # Honest cloud-computing status — verified local release
 
-This is a working local distributed cloud-operations project, not a production cloud platform.
+This is a working distributed cloud-operations project with a verified local runtime and an offline-validated AWS deployment implementation. It is not yet a live-production-certified AWS installation.
 
 ## Completed and verified
 
@@ -15,16 +15,19 @@ This is a working local distributed cloud-operations project, not a production c
 - Encrypted backups, restoration checks and exercised restoration of records/files.
 - Chronologically evaluated statistical forecasts, partial cost estimates and measured service-level ratios.
 - Readable responsive frontend with Team/Group 11 branding removed.
+- Terraform deployment for private ECS Fargate services, ALB, RDS Multi-AZ, MSK Serverless, S3, SES/IAM, Secrets Manager, CloudWatch and immutable ECR images.
+- ECS workload scaling adapter, IAM-based MSK authentication, IAM-based S3 access and native SES delivery.
+- PostgreSQL advisory locking for replica-safe scheduled work and a two-stage database/topic bootstrap procedure.
 
 ## Incomplete or limited
 
-- No verified AWS, Azure or GCP deployment, managed IAM or real cloud billing connection.
+- AWS resources have not been created in a real account, so live IAM, failover, load, restore, SES deliverability and cloud billing remain unverified.
 - Kubernetes adapter logic and focused checks exist, but no live cluster deployment was verified.
 - The stack runs on one computer. Worker replacement does not survive loss of that machine.
 - Predictive-maintenance observations/labels are collected, but no trained failure-prediction model is deployed.
 - Log diagnosis uses transparent rules rather than a GenAI model. Forecasts do not drive autoscaling.
 - External Gmail, Outlook, Slack or generic webhook delivery was not verified with user accounts.
-- Default service networking uses local HTTP/shared internal trust rather than production TLS/mTLS.
+- AWS ingress is designed for ALB TLS, while internal Service Connect traffic still uses HTTP plus the shared internal application secret rather than mTLS.
 - The capacity service controls Docker through the Docker socket, which is a deliberate local-lab privilege.
 - Backups remain in the same local object-store installation. Multi-service restore is coordinated rather than atomic.
 - Cost figures are partial estimates, not provider bills or proof of savings.

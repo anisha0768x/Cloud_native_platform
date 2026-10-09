@@ -4,7 +4,10 @@ USER root
 WORKDIR /opt/platform
 COPY distributed/requirements.txt distributed/constraints.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip pip install --timeout 60 --retries 8 -r requirements.txt
+COPY distributed/requirements-aws.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip pip install --timeout 60 --retries 8 -r requirements-aws.txt
 COPY distributed/helio ./helio
+COPY deploy/aws/bootstrap.py ./aws_bootstrap.py
 COPY web ./web
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER 65532:65532

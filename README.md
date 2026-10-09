@@ -2,7 +2,7 @@
 
 A cloud-native operations platform built from **twelve independent FastAPI microservices**. It lets teams monitor services, manage incidents, scale workloads, store files securely, send notifications and back up or restore the whole system, all from one web dashboard that runs locally with Docker.
 
-> **Status:** Verified local release. It is a single-host demonstration deployment, not a production-certified system. See the [current audit](docs/CURRENT_AUDIT.md) and [`docs/CLOUD_STATUS.md`](docs/CLOUD_STATUS.md) for checks and limitations.
+> **Status:** Verified local release with an AWS deployment implementation. The AWS path is reproducible and validated offline, but it is not a live-production certification until it has been deployed, load-tested and recovery-tested in the target AWS account. See the [AWS deployment guide](deploy/aws/README.md), [current audit](docs/CURRENT_AUDIT.md) and [`docs/CLOUD_STATUS.md`](docs/CLOUD_STATUS.md).
 
 ---
 
@@ -43,6 +43,7 @@ Browser → API Gateway → 12 independent microservices
 - **Event-driven messaging:** transactional outbox pattern, Kafka topics, consumer deduplication, bounded retries, and failed-event inspection and replay.
 - **Single image, many services:** the same application image is started with twelve different service modules and credentials.
 - **Local single-host deployment:** one PostgreSQL server, one Kafka broker and one SeaweedFS installation. Only ports `8080` (dashboard) and `8025` (mail inbox) are published, on loopback only.
+- **AWS deployment path:** ECS Fargate, Service Connect, an HTTPS ALB, RDS PostgreSQL, MSK Serverless, S3, SES, Secrets Manager and CloudWatch are defined in Terraform under `deploy/aws`.
 
 See [`ARCHITECTURE_ALIGNMENT.md`](ARCHITECTURE_ALIGNMENT.md) for more detail.
 

@@ -1,1 +1,2 @@
 -r distributed/requirements.txt
+-r distributed/requirements-aws.txt

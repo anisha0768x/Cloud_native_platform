@@ -21,27 +21,38 @@ MAX_FILE = 10 * 1024 * 1024
 class Objects:
     def __init__(self):
         self.bucket = os.environ.get("S3_BUCKET", "helio-objects")
-        self.s3 = boto3.client(
-            "s3",
-            endpoint_url=os.environ["S3_ENDPOINT"],
-            aws_access_key_id=os.environ["S3_ACCESS_KEY"],
-            aws_secret_access_key=os.environ["S3_SECRET_KEY"],
-            region_name=os.environ.get("S3_REGION", "us-east-1"),
-            config=Config(
+        endpoint = os.environ.get("S3_ENDPOINT")
+        options = {
+            "region_name": os.environ.get("S3_REGION", os.environ.get("AWS_REGION", "us-east-1")),
+            "config": Config(
                 connect_timeout=3,
                 read_timeout=15,
                 retries={"max_attempts": 2},
-                s3={"addressing_style": "path"},
+                s3={
+                    "addressing_style": os.environ.get(
+                        "S3_ADDRESSING_STYLE", "path" if endpoint else "auto"
+                    )
+                },
             ),
-        )
+        }
+        if endpoint:
+            options["endpoint_url"] = endpoint
+        if os.environ.get("S3_ACCESS_KEY"):
+            options["aws_access_key_id"] = os.environ["S3_ACCESS_KEY"]
+            options["aws_secret_access_key"] = os.environ["S3_SECRET_KEY"]
+        self.s3 = boto3.client("s3", **options)
         self.cipher = AESGCM(base64.urlsafe_b64decode(os.environ["STORAGE_ENCRYPTION_KEY"]))
         try:
             self.s3.head_bucket(Bucket=self.bucket)
-        except ClientError:
+        except ClientError as exc:
+            auto_create = os.environ.get("S3_AUTO_CREATE", "true" if endpoint else "false")
+            if auto_create.lower() != "true":
+                raise RuntimeError("Configured S3 bucket is unavailable") from exc
             self.s3.create_bucket(Bucket=self.bucket)
-        self.s3.put_bucket_versioning(
-            Bucket=self.bucket, VersioningConfiguration={"Status": "Enabled"}
-        )
+        if endpoint:
+            self.s3.put_bucket_versioning(
+                Bucket=self.bucket, VersioningConfiguration={"Status": "Enabled"}
+            )
 
     def write(self, key, data):
         nonce = secrets.token_bytes(12)
@@ -80,7 +91,7 @@ def install(app):
             "objects": inventory(),
             "backend": (
                 "S3-compatible object service (SeaweedFS locally)"
-                if os.environ["S3_ENDPOINT"] == "http://objects:8333"
+                if os.environ.get("S3_ENDPOINT") == "http://objects:8333"
                 else "Configured S3-compatible object service"
             ),
             "encryption": "AES-256-GCM",
@@ -157,8 +168,9 @@ def install(app):
                 fail(404, "Object not found")
             if time.time() < row["retention_until"]:
                 fail(409, "This version is still protected by its application retention policy.")
+            options = {"VersionId": row["s3_version"]} if row["s3_version"] else {}
             ctx().objects.s3.delete_object(
-                Bucket=ctx().objects.bucket, Key="objects/" + object_id, VersionId=row["s3_version"]
+                Bucket=ctx().objects.bucket, Key="objects/" + object_id, **options
             )
             db().delete("objects", object_id)
             db().audit(who["email"], "object.deleted", object_id)
