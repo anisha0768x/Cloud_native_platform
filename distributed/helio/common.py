@@ -59,6 +59,7 @@ def kafka_config():
         config["ssl.ca.location"] = os.environ["KAFKA_SSL_CA_LOCATION"]
     return config
 
+
 NAMES = (
     "gateway",
     "auth",

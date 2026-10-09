@@ -72,9 +72,7 @@ def tick(ctx):
         message = f"Helio incident: {row['title']} — {row['service']} — {row['incident_id']}"
         try:
             if row["channel"] == "email":
-                sender = os.environ.get(
-                    "SES_FROM", os.environ.get("SMTP_FROM", "helio@localhost")
-                )
+                sender = os.environ.get("SES_FROM", os.environ.get("SMTP_FROM", "helio@localhost"))
                 recipient = os.environ.get(
                     "SES_TO", os.environ.get("SMTP_TO", "operator@localhost")
                 )

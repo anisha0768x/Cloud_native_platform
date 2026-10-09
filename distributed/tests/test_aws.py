@@ -97,8 +97,9 @@ class AWSContracts(unittest.TestCase):
             "AWS_REGION": "ap-south-1",
             "STORAGE_ENCRYPTION_KEY": base64.urlsafe_b64encode(b"x" * 32).decode(),
         }
-        with patch.dict(os.environ, environment, clear=True), patch(
-            "helio.services.storage.boto3.client", client
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch("helio.services.storage.boto3.client", client),
         ):
             objects = Objects()
         self.assertEqual(objects.bucket, "production-objects")
