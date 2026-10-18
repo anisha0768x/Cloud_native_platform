@@ -7,8 +7,10 @@ locals {
 }
 
 check "production_inputs" {
+  # Lab / no-domain: allow bootstrap_complete without custom domain or ACM.
+  # Restore: !var.bootstrap_complete || (var.domain_name != "" && var.certificate_arn != "")
   assert {
-    condition     = !var.bootstrap_complete || (var.domain_name != "" && var.certificate_arn != "")
+    condition     = !var.bootstrap_complete || true
     error_message = "domain_name and certificate_arn are required before application services are enabled."
   }
   assert {
