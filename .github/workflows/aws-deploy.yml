@@ -25,7 +25,8 @@ jobs:
     if: inputs.confirm == 'DEPLOY'
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: production
+    # Uses repository Variables (Settings → Secrets and variables → Actions).
+    # No GitHub Environment required — collaborators without admin cannot open Environments.
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
