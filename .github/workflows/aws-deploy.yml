@@ -93,6 +93,7 @@ jobs:
           task=$(terraform -chdir=deploy/aws output -raw bootstrap_task_definition)
           subnets=$(terraform -chdir=deploy/aws output -json private_subnet_ids | jq -r 'join(",")')
           security_group=$(terraform -chdir=deploy/aws output -raw task_security_group_id)
+          aws ecs wait services-stable --cluster "$cluster" --services "${TF_VAR_name}-kafka"
           task_arn=$(aws ecs run-task --cluster "$cluster" --task-definition "$task" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$security_group],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text)
           test "$task_arn" != "None"
           aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task_arn"

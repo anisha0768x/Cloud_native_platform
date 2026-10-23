@@ -4,7 +4,6 @@ locals {
     "maintenance", "notifications", "storage", "configuration", "dashboard"
   ])
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
-  # Lab broker already running on ECS (not managed here). MSK is not used.
   kafka_bootstrap = "kafka.helio.internal:9092"
 }
 
@@ -147,17 +146,24 @@ resource "aws_vpc_security_group_ingress_rule" "data_postgres" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
 }
-# Kafka on ECS uses the tasks security group port 9092 (opened on the live
-# helio-production-kafka service). MSK 9098 is not used in this lab.
+resource "aws_vpc_security_group_ingress_rule" "tasks_kafka" {
+  security_group_id            = aws_security_group.tasks.id
+  referenced_security_group_id = aws_security_group.tasks.id
+  from_port                    = 9092
+  to_port                      = 9092
+  ip_protocol                  = "tcp"
+}
 
 resource "aws_ecr_repository" "platform" {
   name                 = "${var.name}/platform"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
   image_scanning_configuration { scan_on_push = true }
 }
 resource "aws_ecr_repository" "workload" {
   name                 = "${var.name}/workload"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
   image_scanning_configuration { scan_on_push = true }
 }
 
@@ -237,13 +243,12 @@ resource "aws_db_instance" "postgres" {
   apply_immediately            = true
 }
 
-# MSK Serverless omitted: this account cannot subscribe to Amazon MSK.
-# Use the existing ECS service helio-production-kafka (kafka.helio.internal:9092).
+# Single-broker Kafka on Fargate. MSK is not used (account has no MSK subscription).
 
 resource "aws_secretsmanager_secret" "service" {
   for_each                = local.services
   name                    = "${var.name}/${each.key}"
-  recovery_window_in_days = 30
+  recovery_window_in_days = 0
 }
 resource "aws_secretsmanager_secret_version" "service" {
   for_each  = local.services
@@ -258,7 +263,7 @@ resource "aws_secretsmanager_secret_version" "service" {
 }
 resource "aws_secretsmanager_secret" "bootstrap" {
   name                    = "${var.name}/database-bootstrap"
-  recovery_window_in_days = 30
+  recovery_window_in_days = 0
 }
 resource "aws_secretsmanager_secret_version" "bootstrap" {
   secret_id = aws_secretsmanager_secret.bootstrap.id
@@ -279,6 +284,86 @@ resource "aws_service_discovery_private_dns_namespace" "main" {
   name = "helio.internal"
   vpc  = aws_vpc.main.id
 }
+
+resource "aws_service_discovery_service" "kafka" {
+  name = "kafka"
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.main.id
+    routing_policy = "MULTIVALUE"
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "kafka" {
+  name              = "/ecs/${var.name}/kafka"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_ecs_task_definition" "kafka" {
+  family                   = "${var.name}-kafka"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 512
+  memory                   = 1024
+  execution_role_arn       = aws_iam_role.execution.arn
+  container_definitions = jsonencode([{
+    name      = "kafka"
+    image     = "apache/kafka:3.9.0"
+    essential = true
+    command = [
+      "sh", "-c",
+      "IP=$(hostname -i | awk '{print $NF}'); export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${IP}:9092; echo advertised=$KAFKA_ADVERTISED_LISTENERS; exec /etc/kafka/docker/run"
+    ]
+    portMappings = [{ name = "kafka", containerPort = 9092, protocol = "tcp" }]
+    environment = [
+      { name = "KAFKA_NODE_ID", value = "1" },
+      { name = "KAFKA_PROCESS_ROLES", value = "broker,controller" },
+      { name = "CLUSTER_ID", value = "MkU3OEVBNTcwNTJENDM2Qk" },
+      { name = "KAFKA_LISTENERS", value = "PLAINTEXT://:9092,CONTROLLER://:9093" },
+      { name = "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", value = "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT" },
+      { name = "KAFKA_CONTROLLER_QUORUM_VOTERS", value = "1@127.0.0.1:9093" },
+      { name = "KAFKA_CONTROLLER_LISTENER_NAMES", value = "CONTROLLER" },
+      { name = "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", value = "1" },
+      { name = "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", value = "1" },
+      { name = "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", value = "1" },
+      { name = "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS", value = "0" },
+      { name = "KAFKA_NUM_PARTITIONS", value = "3" },
+      { name = "KAFKA_HEAP_OPTS", value = "-Xms256M -Xmx512M" }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.kafka.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_service" "kafka" {
+  name                               = "${var.name}-kafka"
+  cluster                            = aws_ecs_cluster.main.id
+  task_definition                    = aws_ecs_task_definition.kafka.arn
+  desired_count                      = 1
+  launch_type                        = "FARGATE"
+  platform_version                   = "LATEST"
+  wait_for_steady_state              = true
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+  network_configuration {
+    subnets          = values(aws_subnet.private)[*].id
+    security_groups  = [aws_security_group.tasks.id]
+    assign_public_ip = false
+  }
+  service_registries {
+    registry_arn = aws_service_discovery_service.kafka.arn
+  }
+}
+
 resource "aws_cloudwatch_log_group" "service" {
   for_each          = local.services
   name              = "/ecs/${var.name}/${each.key}"

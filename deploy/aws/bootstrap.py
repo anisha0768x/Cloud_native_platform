@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 import psycopg
 from psycopg import sql
@@ -57,17 +58,25 @@ def bootstrap_topics():
         "audit.events",
         "events.failed",
     )
-    admin = AdminClient(kafka_config())
     replication = int(os.environ.get("KAFKA_REPLICATION_FACTOR", "3"))
-    futures = admin.create_topics(
-        [NewTopic(topic, num_partitions=3, replication_factor=replication) for topic in topics]
-    )
-    for topic, future in futures.items():
+    last_error = None
+    for attempt in range(12):
         try:
-            future.result()
+            admin = AdminClient(kafka_config())
+            futures = admin.create_topics(
+                [NewTopic(topic, num_partitions=3, replication_factor=replication) for topic in topics]
+            )
+            for topic, future in futures.items():
+                try:
+                    future.result()
+                except Exception as exc:
+                    if "TOPIC_ALREADY_EXISTS" not in str(exc):
+                        raise RuntimeError("Unable to create Kafka topic " + topic) from exc
+            return
         except Exception as exc:
-            if "TOPIC_ALREADY_EXISTS" not in str(exc):
-                raise RuntimeError("Unable to create Kafka topic " + topic) from exc
+            last_error = exc
+            time.sleep(5)
+    raise RuntimeError("Unable to reach Kafka at " + os.environ.get("KAFKA_BOOTSTRAP", "")) from last_error
 
 
 if __name__ == "__main__":
