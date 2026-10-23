@@ -220,12 +220,12 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_instance" "postgres" {
   identifier                   = var.name
   engine                       = "postgres"
-  engine_version               = "17"
+  engine_version               = "17.11"
   instance_class               = var.db_instance_class
   allocated_storage            = 50
   max_allocated_storage        = 250
+  storage_type                 = "gp3"
   storage_encrypted            = true
-  db_name                      = "postgres"
   username                     = "helio_admin"
   password                     = random_password.db_master.result
   multi_az                     = var.db_multi_az
@@ -236,7 +236,7 @@ resource "aws_db_instance" "postgres" {
   skip_final_snapshot          = false
   final_snapshot_identifier    = "${var.name}-final"
   performance_insights_enabled = true
-  apply_immediately            = false
+  apply_immediately            = true
 }
 
 # MSK Serverless omitted: this account cannot subscribe to Amazon MSK.
