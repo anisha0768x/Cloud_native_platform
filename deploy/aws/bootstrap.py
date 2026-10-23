@@ -33,6 +33,10 @@ def bootstrap_databases():
                     sql.Identifier(role), sql.Literal(password)
                 )
             )
+            # RDS master is not a superuser; OWNER requires membership in the role.
+            connection.execute(
+                sql.SQL("GRANT {} TO CURRENT_USER").format(sql.Identifier(role))
+            )
             exists = connection.execute(
                 "SELECT 1 FROM pg_database WHERE datname=%s", (role,)
             ).fetchone()
