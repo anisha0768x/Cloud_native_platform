@@ -222,20 +222,18 @@ resource "aws_db_instance" "postgres" {
   engine                       = "postgres"
   engine_version               = "17.11"
   instance_class               = var.db_instance_class
-  allocated_storage            = 50
-  max_allocated_storage        = 250
+  allocated_storage            = 20
   storage_type                 = "gp3"
   storage_encrypted            = true
   username                     = "helio_admin"
   password                     = random_password.db_master.result
-  multi_az                     = var.db_multi_az
+  multi_az                     = false
   db_subnet_group_name         = aws_db_subnet_group.main.name
   vpc_security_group_ids       = [aws_security_group.data.id]
-  backup_retention_period      = 14
-  deletion_protection          = var.deletion_protection
-  skip_final_snapshot          = false
-  final_snapshot_identifier    = "${var.name}-final"
-  performance_insights_enabled = true
+  backup_retention_period      = 1
+  deletion_protection          = false
+  skip_final_snapshot          = true
+  performance_insights_enabled = false
   apply_immediately            = true
 }
 

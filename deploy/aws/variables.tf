@@ -37,15 +37,15 @@ variable "ses_to" {
 }
 variable "db_instance_class" {
   type    = string
-  default = "db.t4g.small"
+  default = "db.t4g.micro"
 }
 variable "db_multi_az" {
   type    = bool
-  default = true
+  default = false
 }
 variable "deletion_protection" {
   type    = bool
-  default = true
+  default = false
 }
 variable "force_destroy_nonproduction" {
   type    = bool
