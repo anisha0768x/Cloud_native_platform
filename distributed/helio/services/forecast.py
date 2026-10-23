@@ -93,6 +93,21 @@ def predict(points, horizon):
     }
 
 
+def evaluation(ctx, service_id, horizon_seconds):
+    points = rpc(
+        "metrics",
+        "/internal/history?" + urlencode({"service_id": service_id, "metric_name": "request_rate"}),
+    )["points"][-180:]
+    result = predict(points, horizon_seconds)
+    if result["status"] == "ready":
+        ctx.db.put(
+            "evaluations",
+            service_id,
+            {k: v for k, v in result.items() if k not in {"points", "forecast"}},
+        )
+    return result
+
+
 def install(app):
     @app.get("/api/predictions")
     def forecast(
@@ -101,19 +116,14 @@ def install(app):
         horizon_seconds: int = Query(60, ge=10, le=300),
     ):
         actor(request)
-        points = rpc(
-            "metrics",
-            "/internal/history?"
-            + urlencode({"service_id": service_id, "metric_name": "request_rate"}),
-        )["points"][-180:]
-        result = predict(points, horizon_seconds)
-        if result["status"] == "ready":
-            app.state.ctx.db.put(
-                "evaluations",
-                service_id,
-                {k: v for k, v in result.items() if k not in {"points", "forecast"}},
-            )
-        return result
+        return evaluation(app.state.ctx, service_id, horizon_seconds)
+
+    @app.get("/internal/prediction")
+    def internal_prediction(
+        service_id: str = "svc-worker",
+        horizon_seconds: int = Query(60, ge=10, le=300),
+    ):
+        return evaluation(app.state.ctx, service_id, horizon_seconds)
 
 
 app = service_app("forecast", install)

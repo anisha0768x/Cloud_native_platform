@@ -128,6 +128,7 @@ class Autoscale(BaseModel):
     cooldown_seconds: int = Field(default=30, ge=5, le=600)
     consecutive_samples: int = Field(default=3, ge=2, le=10)
     self_heal: bool = True
+    use_forecast: bool = True
 
 
 class Thresholds(BaseModel):

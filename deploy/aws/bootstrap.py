@@ -54,8 +54,9 @@ def bootstrap_topics():
         "events.failed",
     )
     admin = AdminClient(kafka_config())
+    replication = int(os.environ.get("KAFKA_REPLICATION_FACTOR", "3"))
     futures = admin.create_topics(
-        [NewTopic(topic, num_partitions=3, replication_factor=3) for topic in topics]
+        [NewTopic(topic, num_partitions=3, replication_factor=replication) for topic in topics]
     )
     for topic, future in futures.items():
         try:

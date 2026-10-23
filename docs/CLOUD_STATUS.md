@@ -9,7 +9,7 @@ This is a working distributed cloud-operations project with a verified local run
 - Kafka event delivery with persistent outboxes, deduplicating consumers, retries and failed-event replay.
 - Real authentication, roles, CSRF protection, throttling, expiring sessions and authenticator MFA.
 - Measured request/worker monitoring and evidence-based incident workflows.
-- Actual Docker workload scaling, measured-demand autoscaling and failed-worker replacement.
+- Actual Docker workload scaling, measured-demand autoscaling, optional forecast-driven scale-up, and failed-worker replacement.
 - Encrypted/versioned S3-compatible object storage with byte checks and application retention.
 - Persistent notifications and verified local SMTP acceptance through Mailpit.
 - Encrypted backups, restoration checks and exercised restoration of records/files.
@@ -25,7 +25,7 @@ This is a working distributed cloud-operations project with a verified local run
 - Kubernetes adapter logic and focused checks exist, but no live cluster deployment was verified.
 - The stack runs on one computer. Worker replacement does not survive loss of that machine.
 - Predictive-maintenance observations/labels are collected, but no trained failure-prediction model is deployed.
-- Log diagnosis uses transparent rules rather than a GenAI model. Forecasts do not drive autoscaling.
+- Log diagnosis uses transparent rules rather than a GenAI model. Forecasts may raise replica count when predictive autoscaling is enabled; scale-down still uses measured demand.
 - External Gmail, Outlook, Slack or generic webhook delivery was not verified with user accounts.
 - AWS ingress is designed for ALB TLS, while internal Service Connect traffic still uses HTTP plus the shared internal application secret rather than mTLS.
 - The capacity service controls Docker through the Docker socket, which is a deliberate local-lab privilege.

@@ -444,6 +444,94 @@ def test_autoscaler_requires_consecutive_samples_and_respects_cooldown(monkeypat
     assert c.desired == 2
     c.reconcile()
     assert len(c.db.rows("actions")) == 1
+    assert c.db.rows("actions")[0]["reason"] == "measured demand"
+    assert c.last_demand["source"] == "measured"
+    assert c.last_demand["fallback"] == "forecast_not_ready"
+
+
+def _demand_rpc(measured, prediction):
+    def rpc(service, path, *args, **kwargs):
+        if service == "metrics":
+            return {"latest": {"request_rate": {"value": measured, "occurred": time.time()}}}
+        return prediction
+
+    return rpc
+
+
+def test_autoscaler_scales_up_from_ready_forecast_when_measured_is_low(monkeypatch):
+    c, _ = controller(monkeypatch)
+    c.db.put(
+        "policy",
+        "autoscale",
+        Autoscale(
+            enabled=True,
+            target_rps=2,
+            consecutive_samples=2,
+            cooldown_seconds=30,
+            max_replicas=2,
+            use_forecast=True,
+        ).model_dump(),
+    )
+    monkeypatch.setattr(
+        capacity,
+        "rpc",
+        _demand_rpc(1, {"status": "ready", "expected": 20, "model": "Linear trend"}),
+    )
+    c.reconcile()
+    assert c.desired == 1
+    assert c.last_demand["source"] == "forecast"
+    c.reconcile()
+    assert c.desired == 2
+    action = c.db.rows("actions")[0]
+    assert action["actor"] == "autoscaler"
+    assert action["reason"] == "predicted demand"
+
+
+def test_autoscaler_falls_back_to_measured_when_forecast_is_stale(monkeypatch):
+    c, _ = controller(monkeypatch)
+    c.db.put(
+        "policy",
+        "autoscale",
+        Autoscale(
+            enabled=True, target_rps=2, consecutive_samples=2, cooldown_seconds=30, max_replicas=2
+        ).model_dump(),
+    )
+    monkeypatch.setattr(
+        capacity,
+        "rpc",
+        _demand_rpc(10, {"status": "stale", "expected": 80}),
+    )
+    c.reconcile()
+    c.reconcile()
+    assert c.desired == 2
+    assert c.db.rows("actions")[0]["reason"] == "measured demand"
+    assert c.last_demand["fallback"] == "stale"
+
+
+def test_autoscaler_ignores_forecast_when_policy_disables_it(monkeypatch):
+    c, _ = controller(monkeypatch)
+    c.db.put(
+        "policy",
+        "autoscale",
+        Autoscale(
+            enabled=True,
+            target_rps=2,
+            consecutive_samples=2,
+            cooldown_seconds=30,
+            max_replicas=2,
+            use_forecast=False,
+        ).model_dump(),
+    )
+    monkeypatch.setattr(
+        capacity,
+        "rpc",
+        _demand_rpc(1, {"status": "ready", "expected": 40}),
+    )
+    c.reconcile()
+    c.reconcile()
+    assert c.desired == 1
+    assert c.last_demand["source"] == "measured"
+    assert c.last_demand["predicted_rps"] is None
 
 
 def test_controller_replaces_workers_only_after_repeated_health_failure(monkeypatch):

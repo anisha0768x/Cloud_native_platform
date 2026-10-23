@@ -15,7 +15,7 @@ After you start the platform, the web dashboard (served at `http://127.0.0.1:808
 | **Identity & Access** | First-run administrator setup, role-based access (admin / operator / viewer), expiring and revocable sessions, CSRF protection, login throttling and TOTP multi-factor authentication. |
 | **Monitoring (Command Center)** | Live latency, response status, request rate, worker readiness and gateway measurements. |
 | **Incident Management** | Threshold-based incident creation, ownership, acknowledgement, investigation notes, and resolution only after fresh recovery evidence. |
-| **Capacity & Autoscaling** | Creates and removes real Docker worker containers, verifies readiness, runs bounded HTTP load tests, autoscales on measured demand and replaces failed workers. |
+| **Capacity & Autoscaling** | Creates and removes real Docker worker containers, verifies readiness, runs bounded HTTP load tests, autoscales on measured demand (and a ready traffic forecast for scale-up) and replaces failed workers. |
 | **Log Intelligence** | Persisted, searchable logs with secret/email redaction and findings linked to evidence IDs. |
 | **File Storage** | Encrypted S3-compatible object storage with checksums, versioning and retention protection. |
 | **Notifications** | Persistent inbox plus email via a local SMTP server (Mailpit) with retry and duplicate suppression. |

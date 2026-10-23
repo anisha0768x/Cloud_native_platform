@@ -1,6 +1,6 @@
 # AWS production deployment
 
-This stack deploys Helio to ECS Fargate in two Availability Zones. It provisions an ALB, private application tasks, RDS PostgreSQL, MSK Serverless, S3, Secrets Manager, CloudWatch, Service Connect and an independently scalable workload service.
+This stack deploys Helio to ECS Fargate in two Availability Zones. It provisions an ALB, private application tasks, RDS PostgreSQL, S3, Secrets Manager, CloudWatch, Service Connect and an independently scalable workload service. Kafka is a single ECS Fargate broker (`kafka.helio.internal:9092`) instead of MSK Serverless.
 
 ## Safety model
 
@@ -36,6 +36,6 @@ Run `terraform fmt -check -recursive deploy/aws`, `terraform init -backend=false
 
 - ECS controls gateway CPU scaling. The Helio capacity controller controls only the separate workload ECS service.
 - Singleton collection and delivery jobs use PostgreSQL transaction advisory locks, so extra service replicas do not execute the same scheduled pass concurrently.
-- Application services authenticate to MSK Serverless with their ECS task role and to S3/SES through IAM; no static AWS keys are supplied to containers.
+- Application services talk to Kafka over PLAINTEXT inside the VPC (`kafka.helio.internal:9092`) and use IAM for S3/SES; no static AWS keys are supplied to containers.
 - Service database pools default to four connections per task in AWS. Recalculate the RDS connection budget before raising replica limits.
-- MSK, NAT Gateway, Multi-AZ RDS and continuously running Fargate tasks incur cost even when idle.
+- NAT Gateway, Multi-AZ RDS, ALB and continuously running Fargate tasks (including the Kafka broker) incur cost even when idle.

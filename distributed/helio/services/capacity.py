@@ -27,6 +27,7 @@ class Controller:
         self.high = 0
         self.low = 0
         self.error = None
+        self.last_demand = None
         self.mode = os.environ.get("RUNTIME", "docker")
         drivers = {"docker": DockerRuntime, "kubernetes": KubernetesRuntime, "ecs": ECSRuntime}
         if self.mode not in drivers:
@@ -172,22 +173,65 @@ class Controller:
         )
         if not policy["enabled"] or now - self.last_change < policy["cooldown_seconds"]:
             return
-        summary = rpc("metrics", "/internal/summary/svc-worker")
-        point = summary["latest"].get("request_rate")
-        if not point or now - point["occurred"] > 30:
+        decision = self.demand(policy, now)
+        if not decision:
             return
-        target = max(
-            policy["min_replicas"],
-            min(policy["max_replicas"], math.ceil(point["value"] / policy["target_rps"])),
-        )
+        self.last_demand = decision
+        target = decision["target"]
         self.high = self.high + 1 if target > self.desired else 0
         self.low = self.low + 1 if target < self.desired else 0
         if self.high >= policy["consecutive_samples"]:
-            self.change(min(self.desired + 1, target), "autoscaler", "measured demand")
+            self.change(min(self.desired + 1, target), "autoscaler", decision["reason"])
             self.high = 0
         elif self.low >= policy["consecutive_samples"] and not self.active_job:
             self.change(max(self.desired - 1, target), "autoscaler", "sustained low demand")
             self.low = 0
+
+    def demand(self, policy, now):
+        summary = rpc("metrics", "/internal/summary/svc-worker")
+        point = summary["latest"].get("request_rate")
+        if not point or now - point["occurred"] > 30:
+            return None
+        measured = float(point["value"])
+        predicted = None
+        source = "measured"
+        fallback = None
+        if policy.get("use_forecast", True):
+            try:
+                prediction = rpc(
+                    "forecast",
+                    "/internal/prediction?service_id=svc-worker&horizon_seconds=60",
+                )
+                if prediction.get("status") == "ready" and isinstance(
+                    prediction.get("expected"), (int, float)
+                ):
+                    predicted = max(0.0, float(prediction["expected"]))
+                else:
+                    fallback = prediction.get("status") or "forecast_not_ready"
+            except Exception:
+                fallback = "forecast_unavailable"
+        chosen = measured
+        if predicted is not None and predicted > measured:
+            chosen = predicted
+            source = "forecast"
+        target = max(
+            policy["min_replicas"],
+            min(policy["max_replicas"], math.ceil(chosen / policy["target_rps"])),
+        )
+        if source == "forecast":
+            reason = "predicted demand"
+        else:
+            reason = "measured demand"
+        return {
+            "source": source,
+            "measured_rps": round(measured, 3),
+            "predicted_rps": None if predicted is None else round(predicted, 3),
+            "chosen_rps": round(chosen, 3),
+            "target": target,
+            "reason": reason,
+            "fallback": fallback,
+            "evaluated_at": stamp(),
+        }
 
     def endpoint(self):
         with self.lock:
@@ -325,6 +369,7 @@ def install(app):
             "actions": c.db.rows("actions", 50),
             "limits": {"min": 1, "max": 8},
             "autoscale": c.db.get("policy", "autoscale"),
+            "demand_signal": c.last_demand,
         }
 
     @app.post("/api/kubernetes/scale")

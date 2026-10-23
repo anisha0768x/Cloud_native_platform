@@ -4,6 +4,8 @@ locals {
     "maintenance", "notifications", "storage", "configuration", "dashboard"
   ])
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  # Lab broker already running on ECS (not managed here). MSK is not used.
+  kafka_bootstrap = "kafka.helio.internal:9092"
 }
 
 check "production_inputs" {
@@ -145,13 +147,8 @@ resource "aws_vpc_security_group_ingress_rule" "data_postgres" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
 }
-resource "aws_vpc_security_group_ingress_rule" "data_msk" {
-  security_group_id            = aws_security_group.data.id
-  referenced_security_group_id = aws_security_group.tasks.id
-  from_port                    = 9098
-  to_port                      = 9098
-  ip_protocol                  = "tcp"
-}
+# Kafka on ECS uses the tasks security group port 9092 (opened on the live
+# helio-production-kafka service). MSK 9098 is not used in this lab.
 
 resource "aws_ecr_repository" "platform" {
   name                 = "${var.name}/platform"
@@ -242,20 +239,8 @@ resource "aws_db_instance" "postgres" {
   apply_immediately            = false
 }
 
-resource "aws_msk_serverless_cluster" "events" {
-  cluster_name = "${var.name}-events"
-  vpc_config {
-    subnet_ids         = values(aws_subnet.private)[*].id
-    security_group_ids = [aws_security_group.data.id]
-  }
-  client_authentication {
-    sasl {
-      iam {
-        enabled = true
-      }
-    }
-  }
-}
+# MSK Serverless omitted: this account cannot subscribe to Amazon MSK.
+# Use the existing ECS service helio-production-kafka (kafka.helio.internal:9092).
 
 resource "aws_secretsmanager_secret" "service" {
   for_each                = local.services
@@ -320,32 +305,27 @@ resource "aws_iam_role" "task" {
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy" "task" {
-  for_each = local.services
+  for_each = toset(["storage", "capacity", "notifications"])
   role     = aws_iam_role.task[each.key].id
-  policy = jsonencode({ Version = "2012-10-17", Statement = concat([
-    { Effect = "Allow", Action = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"], Resource = aws_msk_serverless_cluster.events.arn },
-    { Effect = "Allow", Action = ["kafka-cluster:ReadData", "kafka-cluster:WriteData", "kafka-cluster:DescribeTopic"], Resource = "${replace(aws_msk_serverless_cluster.events.arn, ":cluster/", ":topic/")}/*" },
-    { Effect = "Allow", Action = ["kafka-cluster:AlterGroup", "kafka-cluster:DescribeGroup"], Resource = "${replace(aws_msk_serverless_cluster.events.arn, ":cluster/", ":group/")}/*" },
-    ], each.key == "storage" ? [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"], Resource = [aws_s3_bucket.objects.arn, "${aws_s3_bucket.objects.arn}/*"] }
-    ] : [], each.key == "capacity" ? [
-    { Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.main.name}/${var.name}-workload" }
-    ] : [], each.key == "notifications" ? [
-    { Effect = "Allow", Action = ["ses:SendEmail"], Resource = "*" }
-  ] : []) })
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      each.key == "storage" ? [
+        { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"], Resource = [aws_s3_bucket.objects.arn, "${aws_s3_bucket.objects.arn}/*"] }
+      ] : [],
+      each.key == "capacity" ? [
+        { Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.main.name}/${var.name}-workload" }
+      ] : [],
+      each.key == "notifications" ? [
+        { Effect = "Allow", Action = ["ses:SendEmail"], Resource = "*" }
+      ] : []
+    )
+  })
 }
 resource "aws_iam_role" "bootstrap" {
   name               = substr("${var.name}-bootstrap-task", 0, 64)
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
-resource "aws_iam_role_policy" "bootstrap" {
-  role = aws_iam_role.bootstrap.id
-  policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"], Resource = aws_msk_serverless_cluster.events.arn },
-    { Effect = "Allow", Action = ["kafka-cluster:CreateTopic", "kafka-cluster:DescribeTopic"], Resource = "${replace(aws_msk_serverless_cluster.events.arn, ":cluster/", ":topic/")}/*" }
-  ] })
-}
-
 resource "aws_lb" "gateway" {
   name               = substr(replace(var.name, "_", "-"), 0, 32)
   internal           = false
@@ -480,9 +460,8 @@ resource "aws_ecs_task_definition" "service" {
     environment = concat([
       { name = "HELIO_SERVICE", value = each.key },
       { name = "AWS_REGION", value = var.aws_region },
-      { name = "KAFKA_BOOTSTRAP", value = aws_msk_serverless_cluster.events.bootstrap_brokers_sasl_iam },
-      { name = "KAFKA_SECURITY_PROTOCOL", value = "SASL_SSL" },
-      { name = "KAFKA_SASL_MECHANISM", value = "OAUTHBEARER" },
+      { name = "KAFKA_BOOTSTRAP", value = local.kafka_bootstrap },
+      { name = "KAFKA_SECURITY_PROTOCOL", value = "PLAINTEXT" },
       { name = "SERVICE_URL_TEMPLATE", value = "http://{service}.helio.internal:8000" },
       { name = "DB_POOL_MIN", value = "1" },
       { name = "DB_POOL_MAX", value = "4" }
@@ -641,9 +620,9 @@ resource "aws_ecs_task_definition" "bootstrap" {
     command   = ["python", "/opt/platform/aws_bootstrap.py"]
     environment = [
       { name = "AWS_REGION", value = var.aws_region },
-      { name = "KAFKA_BOOTSTRAP", value = aws_msk_serverless_cluster.events.bootstrap_brokers_sasl_iam },
-      { name = "KAFKA_SECURITY_PROTOCOL", value = "SASL_SSL" },
-      { name = "KAFKA_SASL_MECHANISM", value = "OAUTHBEARER" }
+      { name = "KAFKA_BOOTSTRAP", value = local.kafka_bootstrap },
+      { name = "KAFKA_SECURITY_PROTOCOL", value = "PLAINTEXT" },
+      { name = "KAFKA_REPLICATION_FACTOR", value = "1" }
     ]
     secrets = [
       { name = "MASTER_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.bootstrap.arn}:MASTER_DATABASE_URL::" },
