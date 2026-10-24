@@ -53,7 +53,7 @@ variable "force_destroy_nonproduction" {
 }
 variable "gateway_desired_count" {
   type    = number
-  default = 2
+  default = 1
 }
 variable "service_desired_count" {
   type    = number

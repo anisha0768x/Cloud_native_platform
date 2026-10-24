@@ -530,6 +530,7 @@ resource "aws_ecs_task_definition" "service" {
   family                   = "${var.name}-${each.key}"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+  # Service Connect needs headroom; 0.5 vCPU per task. Account Fargate quota may limit how many can run at once.
   cpu                      = 512
   memory                   = 1024
   execution_role_arn       = aws_iam_role.execution.arn
@@ -566,7 +567,8 @@ resource "aws_ecs_task_definition" "service" {
     secrets = [for key in ["DATABASE_URL", "INTERNAL_SECRET", "SETUP_TOKEN", "AUTH_ENCRYPTION_KEY", "STORAGE_ENCRYPTION_KEY"] : {
       name = key, valueFrom = "${aws_secretsmanager_secret.service[each.key].arn}:${key}::"
     }]
-    healthCheck      = { command = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready',timeout=3)\" || exit 1"], interval = 30, timeout = 5, retries = 3, startPeriod = 60 }
+    # Use /health (process up) not /ready (Kafka/DB dependencies) so a broker blip does not kill the task.
+    healthCheck      = { command = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=3)\" || exit 1"], interval = 30, timeout = 5, retries = 3, startPeriod = 60 }
     logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.service[each.key].name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "service" } }
     linuxParameters  = { initProcessEnabled = true }
   }])
@@ -582,8 +584,10 @@ resource "aws_ecs_service" "service" {
   platform_version                   = "LATEST"
   enable_execute_command             = true
   force_new_deployment               = true
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
+  # Free-tier Fargate vCPU quotas cannot afford overlapping tasks during rollout.
+  availability_zone_rebalancing      = "DISABLED"
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
   deployment_circuit_breaker {
     enable   = true
     rollback = true
@@ -636,12 +640,16 @@ resource "aws_cloudwatch_log_group" "workload" {
   retention_in_days = var.log_retention_days
 }
 resource "aws_ecs_service" "workload" {
-  count           = var.bootstrap_complete ? 1 : 0
-  name            = "${var.name}-workload"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.workload.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  count                              = var.bootstrap_complete ? 1 : 0
+  name                               = "${var.name}-workload"
+  cluster                            = aws_ecs_cluster.main.id
+  task_definition                    = aws_ecs_task_definition.workload.arn
+  desired_count                      = 1
+  launch_type                        = "FARGATE"
+  force_new_deployment               = true
+  availability_zone_rebalancing      = "DISABLED"
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
   deployment_circuit_breaker {
     enable   = true
     rollback = true
@@ -667,8 +675,8 @@ resource "aws_ecs_service" "workload" {
 
 resource "aws_appautoscaling_target" "gateway" {
   count              = var.bootstrap_complete ? 1 : 0
-  max_capacity       = 8
-  min_capacity       = 2
+  max_capacity       = 2
+  min_capacity       = 1
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.service["gateway"].name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
