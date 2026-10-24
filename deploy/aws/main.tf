@@ -315,7 +315,7 @@ resource "aws_ecs_task_definition" "kafka" {
     essential = true
     command = [
       "sh", "-c",
-      "IP=$(hostname -i | awk '{print $NF}'); export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${IP}:9092; echo advertised=$KAFKA_ADVERTISED_LISTENERS; exec /etc/kafka/docker/run"
+      "IP=$(hostname -i | awk '{print $NF}'); export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://$${IP}:9092; echo advertised=$$KAFKA_ADVERTISED_LISTENERS; exec /etc/kafka/docker/run"
     ]
     portMappings = [{ name = "kafka", containerPort = 9092, protocol = "tcp" }]
     environment = [
