@@ -545,14 +545,15 @@ resource "aws_ecs_task_definition" "service" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "KAFKA_BOOTSTRAP", value = local.kafka_bootstrap },
       { name = "KAFKA_SECURITY_PROTOCOL", value = "PLAINTEXT" },
-      { name = "SERVICE_URL_TEMPLATE", value = "http://{service}.helio.internal:8000" },
+      # ECS Service Connect aliases are short names (auth, catalog, …), not Cloud Map DNS.
+      { name = "SERVICE_URL_TEMPLATE", value = "http://{service}:8000" },
       { name = "DB_POOL_MIN", value = "1" },
       { name = "DB_POOL_MAX", value = "4" }
       ], each.key == "capacity" ? [
       { name = "RUNTIME", value = "ecs" },
       { name = "ECS_CLUSTER", value = aws_ecs_cluster.main.name },
       { name = "ECS_WORKLOAD_SERVICE", value = "${var.name}-workload" },
-      { name = "ECS_WORKLOAD_URL", value = "http://workload.helio.internal:9090" }
+      { name = "ECS_WORKLOAD_URL", value = "http://workload:9090" }
       ] : [], each.key == "storage" ? [
       { name = "S3_BUCKET", value = aws_s3_bucket.objects.id },
       { name = "S3_REGION", value = var.aws_region },
@@ -580,6 +581,7 @@ resource "aws_ecs_service" "service" {
   launch_type                        = "FARGATE"
   platform_version                   = "LATEST"
   enable_execute_command             = true
+  force_new_deployment               = true
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   deployment_circuit_breaker {
